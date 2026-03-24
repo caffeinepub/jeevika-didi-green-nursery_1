@@ -1,220 +1,245 @@
-import { useCallback, useEffect, useState } from "react";
-import type { Bill } from "./backend";
-import type { backendInterface } from "./backend";
-import { createActorWithConfig } from "./config";
+import { useEffect, useState } from "react";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const PLANT_LIST = [
-  "कदंब",
-  "आम",
-  "जामुन",
-  "अर्जुन",
-  "महोगनी",
-  "सागवान",
-  "लीची",
-  "अमरूद",
-  "नीम",
-  "आंवला",
-  "अशोक",
-  "गुलाब",
-  "तुलसी",
-  "बरगद",
-  "पीपल",
-];
-
-interface PlantItem {
-  plant: string;
-  customPlant: string;
-  quantity: number;
-  price: number;
-}
-
-interface ParsedItem {
-  plant: string;
-  quantity: number;
-  price: number;
-  subtotal: number;
-}
-
-function emptyItem(): PlantItem {
-  return { plant: "", customPlant: "", quantity: 1, price: 0 };
-}
-
 const today = new Date().toISOString().split("T")[0];
 
-// ─── Print helpers ────────────────────────────────────────────────────────────
+// ─── Smart Billing Types ──────────────────────────────────────────────────────
 
-function printSingleBill(bill: Bill) {
-  const items: ParsedItem[] = JSON.parse(bill.itemsJson || "[]");
-  const itemsRows = items
-    .map(
-      (it) =>
-        `<tr><td>${it.plant}</td><td>${it.quantity}</td><td>₹${it.price}</td><td>₹${(it.quantity * it.price).toFixed(0)}</td></tr>`,
-    )
+interface SmartBill {
+  id: number;
+  billNumber: string;
+  date: string;
+  state: string;
+  district: string;
+  block: string;
+  panchayat: string;
+  material: string;
+  rate: number;
+  quantity: number;
+  amount: number;
+  transport: number;
+  paid: number;
+  pending: number;
+  vendor: string;
+  financialYear: string;
+}
+
+const STORAGE_KEY = "jeevika_secure_billing";
+const KHATA_KEY = "jeevika_khata_bahi";
+
+// ─── Khata Bahi Types ─────────────────────────────────────────────────────────
+
+interface KhataEntry {
+  id: number;
+  billNumber: string;
+  date: string;
+  customerName: string;
+  block: string;
+  panchayat: string;
+  material: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+  paid: number;
+  pending: number;
+  remarks: string;
+}
+
+function generateKhataNumber(entries: KhataEntry[]): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const c = entries.length + 1;
+  return `KHB/${y}${m}/${String(c).padStart(4, "0")}`;
+}
+
+function saveKhataToStorage(entries: KhataEntry[]): void {
+  localStorage.setItem(KHATA_KEY, JSON.stringify(entries));
+}
+
+const PANCHAYAT_MAP: Record<string, string[]> = {
+  HARSIDHI: [
+    "BAIRIYADIH",
+    "BHADA",
+    "CHAR RAHIYA",
+    "DHIWADHAR",
+    "GAYGJAT",
+    "HARPUR",
+    "HARSIDHI PAKARIYA",
+    "JAGAPAKAR",
+    "KANCHHEDWA",
+    "KRIT PUR",
+    "MANIK PUR",
+    "MATHLOHIYAR",
+    "MATIYARIYA",
+    "MURAR PUR OLAHA",
+    "MENATA TOLA PANAPUR",
+    "RANJITA",
+    "SONBARSA",
+    "UJJAIN LOHIYAR",
+    "YADAVPUR",
+  ],
+  TURKAULIA: [
+    "BELWA RAY",
+    "BIJUL PUR",
+    "CHARGHA",
+    "HARDIYA",
+    "JAISINGHPUR EAST",
+    "JAISINGHPUR NORTH",
+    "JAISINGHPUR SOUTH",
+    "MADHOPUR MADHUMALAT",
+    "MATHURAPUR",
+    "RAGHUNATHPUR",
+    "SAPAHI",
+    "SHANKAR SARAYA NORTH",
+    "SARAYA SOUTH",
+    "TURKAULI EAST",
+    "TURKAULI MIDDLE",
+    "TURKAULIA WEST",
+  ],
+  SUGAULI: [
+    "BAGHI",
+    "BHARGAWA",
+    "BHATHA KARAMWA",
+    "RAGHUNATHPUR",
+    "MALI",
+    "NORTH CHHAPRABAHAS",
+    "NORTH SRIPUR",
+    "NORTH SUGAWN",
+    "PANJIARWA",
+    "PHULWARIA",
+    "SHUKUL PAKAR",
+    "SOUTH CHHAPRABAHAS",
+    "MANSINGHA",
+    "SOUTH SRIPUR",
+    "SOUTH SUGAWN",
+    "UTTARI MANSINGHA",
+  ],
+  Banjariya: [
+    "AJGARI",
+    "BANJARIYA",
+    "CHAILAHA EAST",
+    "PANCHRUKHA",
+    "EAST SISWA",
+    "JANERWA MADHYA",
+    "NORTH FULWAR",
+    "ROHINIYA",
+    "SEMRA",
+    "SOUTH FULWAR WEST",
+    "WEST SISWA",
+  ],
+  MOTIHARI: [
+    "BARDAHA",
+    "BARIYAR PUR",
+    "BARWA",
+    "BASMANPUR",
+    "CHANDRAHIYA",
+    "CHHATAUNI AMAR DHRUV",
+    "LAKHAURA",
+    "GORHWA",
+    "JHITKAHIYA",
+    "KATHAN",
+    "MADHUBANI GHAT",
+    "NARURANGIYA",
+    "NORTH DHEKAHAN",
+    "PATAURA",
+    "RAMGARWA",
+    "RAMSINGH CHHATAUNI",
+    "RULAHI",
+    "SIRSAMAL",
+    "TIKULIYA",
+    "WEST DHEKAHA",
+  ],
+};
+
+const ALL_BLOCKS = [
+  "ADAPUR",
+  "ARERAJ",
+  "Banjariya",
+  "Bankatwa",
+  "CHAKIA (PIPRA)",
+  "Chawradano",
+  "CHIRAIYA",
+  "DHAKA",
+  "GHORASAHAN",
+  "HARSIDHI",
+  "KALYANPUR",
+  "KESARIA",
+  "Kotwa",
+  "MADHUBAN",
+  "MEHSI",
+  "MOTIHARI",
+  "PAHARPUR",
+  "PAKRIDAYAL",
+  "PATAHI",
+  "Phenhara",
+  "Pipra Kothi",
+  "RAMGARHWA",
+  "RAXAUL",
+  "Sangrampur",
+  "SUGAULI",
+  "Tetariya",
+  "TURKAULIA",
+];
+
+function generateBillNumber(bills: SmartBill[]): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const c = bills.length + 1;
+  return `JDN/${y}${m}/${String(c).padStart(4, "0")}`;
+}
+
+function computeAmount(rate: string, qty: string): number {
+  return (Number.parseFloat(rate) || 0) * (Number.parseFloat(qty) || 0);
+}
+
+function computePending(
+  rate: string,
+  qty: string,
+  transport: string,
+  paid: string,
+): number {
+  const total = computeAmount(rate, qty) + (Number.parseFloat(transport) || 0);
+  return Math.max(0, total - (Number.parseFloat(paid) || 0));
+}
+
+function getPaymentStatus(bill: SmartBill): { text: string; isPaid: boolean } {
+  const total = bill.amount + (bill.transport || 0);
+  if (bill.paid >= total) return { text: "पूर्ण भुगतान", isPaid: true };
+  if (bill.paid > 0) return { text: "आंशिक भुगतान", isPaid: false };
+  return { text: "बकाया", isPaid: false };
+}
+
+function saveBillsToStorage(bills: SmartBill[]): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(bills));
+}
+
+function generatePrintHTML(
+  billsToPrint: SmartBill[],
+  title: string,
+  finYear: string,
+): string {
+  const totalAmt = billsToPrint.reduce((s, b) => s + b.amount, 0);
+  const totalTrans = billsToPrint.reduce((s, b) => s + (b.transport || 0), 0);
+  const totalPaid = billsToPrint.reduce((s, b) => s + (b.paid || 0), 0);
+  const totalPending = billsToPrint.reduce((s, b) => s + (b.pending || 0), 0);
+  const grand = totalAmt + totalTrans;
+  const rows = billsToPrint
+    .map((b, i) => {
+      const total = b.amount + (b.transport || 0);
+      const status =
+        b.pending === 0 ? "पूर्ण भुगतान" : b.paid > 0 ? "आंशिक" : "बकाया";
+      return `<tr><td>${i + 1}</td><td>${b.billNumber}</td><td>${b.date}</td><td>${b.block}</td><td>${b.panchayat}</td><td>${b.material}</td><td>₹${b.rate}</td><td>${b.quantity}</td><td>₹${b.amount.toFixed(2)}</td><td>₹${(b.transport || 0).toFixed(2)}</td><td>₹${total.toFixed(2)}</td><td>₹${(b.paid || 0).toFixed(2)}</td><td>₹${(b.pending || 0).toFixed(2)}</td><td>${status}</td><td>${b.vendor}</td></tr>`;
+    })
     .join("");
-  const printDate = new Date().toLocaleDateString("hi-IN");
-  const html = `<html><head><title>बिल #${bill.billNo}</title>
-    <style>body{font-family:Arial,sans-serif;padding:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #000;padding:8px;text-align:left}th{background:#2b5e2b;color:white}@media print{button{display:none}}</style></head>
-    <body>
-      <div style="text-align:center;margin-bottom:16px"><h2>जीविका दीदी ग्रीन नर्सरी</h2><p>पूर्वी चंपारण, बिहार - 845401 | मो: 9504800073</p><hr></div>
-      <h3>बिल #${bill.billNo || "—"} की रसीद</h3>
-      <table><tr><td><b>ब्लॉक:</b> ${bill.block}</td><td><b>पंचायत:</b> ${bill.panchayat}</td></tr>
-      <tr><td><b>ग्राहक:</b> ${bill.customerName}</td><td><b>P.R.S:</b> ${bill.prsName}</td></tr>
-      <tr><td><b>मोबाइल:</b> ${bill.mobile}</td><td><b>बिल दिनांक:</b> ${bill.billDate}</td></tr>
-      <tr><td><b>वर्क कोड:</b> ${bill.workCode}</td><td><b>भुगतान:</b> ${bill.paymentDate || "—"}</td></tr></table>
-      <h4 style="margin-top:16px">पौधों की सूची:</h4>
-      <table><thead><tr><th>पौधे का नाम</th><th>मात्रा</th><th>दर (₹)</th><th>कुल (₹)</th></tr></thead>
-      <tbody>${itemsRows}<tr style="background:#f9c74f;font-weight:bold"><td colspan="3" style="text-align:right">कुल योग</td><td>₹${bill.total}</td></tr></tbody></table>
-      <div style="margin-top:50px;display:flex;justify-content:space-between">
-        <div style="text-align:center"><div style="width:200px;border-bottom:2px solid #333"></div><p>ग्राहक के हस्ताक्षर</p></div>
-        <div style="text-align:center"><div style="width:200px;border-bottom:2px solid #333"></div><p>विक्रेता के हस्ताक्षर</p></div>
-        <div><p>दिनांक: ${printDate}</p></div>
-      </div>
-      <div style="text-align:center;margin-top:20px"><button type="button" onclick="window.print()">प्रिंट करें</button> <button type="button" onclick="window.close()">बंद करें</button></div>
-    </body></html>`;
-  const w = window.open("", "_blank");
-  if (w) {
-    w.document.write(html);
-    w.document.close();
-  }
-}
-
-function printLocationLedger(block: string, panchayat: string, bills: Bill[]) {
-  const locationBills = bills
-    .filter((b) => b.block === block && b.panchayat === panchayat)
-    .sort((a, b) => (a.billDate || "").localeCompare(b.billDate || ""));
-  if (!locationBills.length) return;
-  let grandTotal = 0;
-  let rows = "";
-  for (const t of locationBills) {
-    grandTotal += t.total;
-    const items: ParsedItem[] = JSON.parse(t.itemsJson || "[]");
-    rows += `<tr class="bill-sep"><td colspan="8" style="background:#d4e6c3;font-weight:bold">बिल: ${t.billNo || "—"} | दिनांक: ${t.billDate} | ग्राहक: ${t.customerName}</td></tr>`;
-    rows += `<tr><td>${t.customerName}</td><td>${t.block}</td><td>${t.panchayat}</td><td>${t.prsName}</td><td>${t.mobile}</td><td>${t.workCode}</td><td>${t.paymentDate || "—"}</td><td>${t.billNo}</td></tr>`;
-    rows += `<tr style="background:#e1f0d8"><th colspan="2">पौधे का नाम</th><th>मात्रा</th><th>दर</th><th>कुल</th><th colspan="3"></th></tr>`;
-    for (const it of items) {
-      rows += `<tr><td colspan="2">${it.plant}</td><td>${it.quantity}</td><td>₹${it.price}</td><td>₹${(it.quantity * it.price).toFixed(0)}</td><td colspan="3"></td></tr>`;
-    }
-    rows += `<tr style="border-top:2px solid #2d6a4f;background:#f5f5dc"><td colspan="4" style="text-align:right"><b>इस बिल का योग</b></td><td><b>₹${t.total}</b></td><td colspan="3"></td></tr>`;
-  }
-  rows += `<tr style="background:#f9c74f;font-weight:bold"><td colspan="4" style="text-align:right;font-size:1.1rem">सभी बिलों का कुल योग</td><td colspan="4" style="font-size:1.1rem">₹${grandTotal}</td></tr>`;
-  const html = `<html><head><title>${block} - ${panchayat} खाता</title>
-    <style>body{font-family:Arial,sans-serif;padding:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #999;padding:8px;text-align:left}th{background:#2b5e2b;color:white}@media print{button{display:none}}</style></head>
-    <body><h2 style="color:#2b5e2b;border-bottom:2px solid #2b5e2b">${block} - ${panchayat} का विस्तृत खाता</h2>
-    <p><b>कुल बिल:</b> ${locationBills.length} | <b>कुल राशि:</b> ₹${grandTotal}</p>
-    <table><thead><tr><th>ग्राहक नाम</th><th>ब्लॉक</th><th>पंचायत</th><th>P.R.S नाम</th><th>मोबाइल</th><th>वर्क कोड</th><th>भुगतान तिथि</th><th>बिल नं.</th></tr></thead>
-    <tbody>${rows}</tbody></table>
-    <div style="margin-top:50px;display:flex;justify-content:space-between">
-      <div style="text-align:center"><div style="width:200px;border-bottom:2px solid #333"></div><p>ग्राहक के हस्ताक्षर</p></div>
-      <div style="text-align:center"><div style="width:200px;border-bottom:2px solid #333"></div><p>विक्रेता के हस्ताक्षर</p></div>
-    </div>
-    <div style="text-align:center;margin-top:20px"><button type="button" onclick="window.print()">प्रिंट करें</button> <button type="button" onclick="window.close()">बंद करें</button></div>
-    </body></html>`;
-  const w = window.open("", "_blank");
-  if (w) {
-    w.document.write(html);
-    w.document.close();
-  }
-}
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function PlantItemRow({
-  item,
-  index,
-  onChange,
-  onRemove,
-  prefix,
-}: {
-  item: PlantItem;
-  index: number;
-  onChange: (index: number, updated: PlantItem) => void;
-  onRemove: (index: number) => void;
-  prefix: string;
-}) {
-  const isOther = item.plant === "OTHER";
-  return (
-    <div className="item-row">
-      <div>
-        <select
-          className="form-select"
-          style={{ width: "100%" }}
-          data-ocid={`${prefix}.item.${index + 1}`}
-          value={item.plant}
-          onChange={(e) =>
-            onChange(index, { ...item, plant: e.target.value, customPlant: "" })
-          }
-          required
-        >
-          <option value="">-- पौधा चुनें --</option>
-          {PLANT_LIST.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-          <option value="OTHER">✨ अन्य (नया नाम)</option>
-        </select>
-        {isOther && (
-          <input
-            type="text"
-            className="form-input"
-            style={{ width: "100%", marginTop: "4px" }}
-            placeholder="नए पौधे का नाम लिखें"
-            value={item.customPlant}
-            onChange={(e) =>
-              onChange(index, { ...item, customPlant: e.target.value })
-            }
-            required
-          />
-        )}
-      </div>
-      <input
-        type="number"
-        className="form-input"
-        placeholder="मात्रा"
-        min={1}
-        value={item.quantity}
-        onChange={(e) =>
-          onChange(index, {
-            ...item,
-            quantity: Number.parseInt(e.target.value) || 1,
-          })
-        }
-        required
-      />
-      <input
-        type="number"
-        className="form-input"
-        placeholder="कीमत"
-        min={0}
-        step={1}
-        value={item.price}
-        onChange={(e) =>
-          onChange(index, {
-            ...item,
-            price: Number.parseFloat(e.target.value) || 0,
-          })
-        }
-        required
-      />
-      <button
-        type="button"
-        className="remove-btn"
-        onClick={() => onRemove(index)}
-        title="हटाएं"
-        data-ocid={`${prefix}.delete_button.${index + 1}`}
-      >
-        <i className="fas fa-trash" />
-      </button>
-    </div>
-  );
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title><style>body{font-family:Arial;margin:20px;}.print-header{text-align:center;border-bottom:2px solid #2b8c4a;margin-bottom:20px;}.print-table{border-collapse:collapse;width:100%;font-size:9px;}.print-table th,.print-table td{border:1px solid #000;padding:4px;}</style></head><body><div class="print-header"><h2>🌿 जीविका दीदी ग्रीन नर्सरी, प्लांटेशन-गेबियन (बांस गेबियन)</h2><p><strong>प्रभारी दीदी:</strong> रुकमीना देवी | <strong>संचालक:</strong> बुलेट प्रसाद</p><p><strong>पता:</strong> ग्राम - पकरिया, पोस्ट- अजगरी, थाना- बंजरिया, जिला- पूर्वी चंपारण, पिन-845401</p><p><strong>मोबाइल:</strong> 8292480148, 9504800073 | वित्तीय वर्ष: ${finYear}</p><h3>${title}</h3><p>कुल बिल: ${billsToPrint.length} | तिथि: ${new Date().toLocaleString()}</p></div><table class="print-table"><thead><tr><th>क्र.</th><th>बिल नं.</th><th>तिथि</th><th>ब्लॉक</th><th>पंचायत</th><th>सामग्री</th><th>दर</th><th>मात्रा</th><th>राशि</th><th>गाड़ी</th><th>कुल</th><th>प्राप्त</th><th>बकाया</th><th>स्थिति</th><th>विक्रेता</th></tr></thead><tbody>${rows}<tr style="font-weight:bold"><td colspan="8" align="right">कुल योग</td><td>₹${totalAmt.toFixed(2)}</td><td>₹${totalTrans.toFixed(2)}</td><td>₹${grand.toFixed(2)}</td><td>₹${totalPaid.toFixed(2)}</td><td>₹${totalPending.toFixed(2)}</td><td colspan="2"></td></tr></tbody></table><div><p>हस्ताक्षर : ___________ &nbsp;&nbsp; दिनांक : ${new Date().toLocaleDateString()}</p><p>© जीविका दीदी ग्रीन नर्सरी</p></div></body></html>`;
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [actor, setActor] = useState<backendInterface | null>(null);
   const [activeSection, setActiveSection] = useState("home");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -224,93 +249,109 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrollVisible, setScrollVisible] = useState(false);
 
-  // Ledger state
-  const [bills, setBills] = useState<Bill[]>([]);
-  const [billsLoading, setBillsLoading] = useState(false);
-  const [billsError, setBillsError] = useState("");
+  // Khata Bahi login state
+  const [isKhataLoggedIn, setIsKhataLoggedIn] = useState(false);
+  const [showKhataModal, setShowKhataModal] = useState(false);
+  const [khataUser, setKhataUser] = useState("");
+  const [khataPwd, setKhataPwd] = useState("");
+  const [khataError, setKhataError] = useState("");
 
-  // Add bill form
-  const [formData, setFormData] = useState({
-    block: "",
-    panchayat: "",
-    customerName: "",
-    billNo: "",
-    billDate: today,
-    workCode: "",
-    paymentDate: "",
-    prsName: "",
-    mobile: "",
+  // Khata Bahi data state
+  const [khataEntries, setKhataEntries] = useState<KhataEntry[]>(() => {
+    const stored = localStorage.getItem(KHATA_KEY);
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch {
+        /* ignore */
+      }
+    }
+    return [];
   });
-  const [formItems, setFormItems] = useState<PlantItem[]>([emptyItem()]);
-  const [formSubmitting, setFormSubmitting] = useState(false);
+  const [editingKhata, setEditingKhata] = useState<KhataEntry | null>(null);
+  const [kbCustomer, setKbCustomer] = useState("");
+  const [kbBlock, setKbBlock] = useState("");
+  const [kbPanchayat, setKbPanchayat] = useState("");
+  const [kbMaterial, setKbMaterial] = useState("");
+  const [kbQty, setKbQty] = useState("");
+  const [kbRate, setKbRate] = useState("");
+  const [kbDate, setKbDate] = useState(today);
+  const [kbPaid, setKbPaid] = useState("0");
+  const [kbBillNo, setKbBillNo] = useState("");
+  const [kbRemarks, setKbRemarks] = useState("");
+  const [kbSearchCustomer, setKbSearchCustomer] = useState("");
+  const [kbFilterBlock, setKbFilterBlock] = useState("");
+  const [kbFilterPanchayat, setKbFilterPanchayat] = useState("");
 
-  // Edit modal
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingBill, setEditingBill] = useState<Bill | null>(null);
-  const [editData, setEditData] = useState({
-    block: "",
-    panchayat: "",
-    customerName: "",
-    billNo: "",
-    billDate: "",
-    workCode: "",
-    paymentDate: "",
-    prsName: "",
-    mobile: "",
+  // Smart Billing System (localStorage)
+  const [smartBills, setSmartBills] = useState<SmartBill[]>(() => {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch {
+        /* ignore */
+      }
+    }
+    const seed: SmartBill = {
+      id: Date.now(),
+      billNumber: "JDN/202501/0001",
+      date: new Date().toISOString().slice(0, 10),
+      state: "बिहार",
+      district: "पूर्वी चंपारण",
+      block: "Banjariya",
+      panchayat: "AJGARI",
+      material: "बांस गेबियन",
+      rate: 450,
+      quantity: 10,
+      amount: 4500,
+      transport: 500,
+      paid: 3000,
+      pending: 2000,
+      vendor: "RUKMINA DEVI",
+      financialYear: "2025-2026",
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([seed]));
+    return [seed];
   });
-  const [editItems, setEditItems] = useState<PlantItem[]>([emptyItem()]);
-  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [globalFinancialYear, setGlobalFinancialYear] = useState("2025-2026");
+  const [editingSmartBill, setEditingSmartBill] = useState<SmartBill | null>(
+    null,
+  );
 
-  // Search
-  const [searchBlock, setSearchBlock] = useState("");
-  const [searchPanchayat, setSearchPanchayat] = useState("");
-  const [searchCustomer, setSearchCustomer] = useState("");
-  const [activeSearch, setActiveSearch] = useState({
-    block: "",
-    panchayat: "",
-    customer: "",
-  });
+  // Bill form state
+  const [sbBlock, setSbBlock] = useState("");
+  const [sbPanchayat, setSbPanchayat] = useState("");
+  const [sbBillNumber, setSbBillNumber] = useState("");
+  const [sbMaterial, setSbMaterial] = useState("");
+  const [sbVendor, setSbVendor] = useState("RUKMINA DEVI");
+  const [sbRate, setSbRate] = useState("");
+  const [sbQty, setSbQty] = useState("");
+  const [sbTransport, setSbTransport] = useState("0");
+  const [sbPaid, setSbPaid] = useState("0");
+  const [sbDate, setSbDate] = useState(today);
+  const [sbFinYear, setSbFinYear] = useState("2025-2026");
 
-  // Ledger detail
-  const [detailLocation, setDetailLocation] = useState<{
-    block: string;
-    panchayat: string;
-  } | null>(null);
+  // Filter state
+  const [filterBlock, setFilterBlock] = useState("");
+  const [filterPanchayat, setFilterPanchayat] = useState("");
+  const [filterBillNo, setFilterBillNo] = useState("");
+  const [filterMaterial, setFilterMaterial] = useState("");
+  const [filterYear, setFilterYear] = useState("");
+  const [filterPayment, setFilterPayment] = useState("");
 
   // ── Scroll top ──
-  useEffect(() => {
-    createActorWithConfig().then(setActor).catch(console.error);
-  }, []);
-
   useEffect(() => {
     const handler = () => setScrollVisible(window.scrollY > 300);
     window.addEventListener("scroll", handler);
     return () => window.removeEventListener("scroll", handler);
   }, []);
 
-  // ── Load bills ──
-  const loadBills = useCallback(async () => {
-    setBillsLoading(true);
-    setBillsError("");
-    try {
-      const data = await actor!.getAllBills();
-      setBills(data);
-    } catch {
-      setBillsError("डेटा लोड नहीं हो सका। कृपया पुनः प्रयास करें।");
-    } finally {
-      setBillsLoading(false);
-    }
-  }, [actor]);
-
-  useEffect(() => {
-    if (isLoggedIn) loadBills();
-  }, [isLoggedIn, loadBills]);
-
   // ── Login ──
   function handleLogin() {
     if (
-      loginUsername === "jeevikadidigreennursery" &&
-      loginPassword === "Jeevika"
+      loginUsername === "JEEVIKA DIDI GREEN NURSERY" &&
+      loginPassword === "Jeevika@123"
     ) {
       setIsLoggedIn(true);
       setShowLoginModal(false);
@@ -328,237 +369,35 @@ export default function App() {
     setActiveSection("home");
   }
 
+  function handleKhataLogin() {
+    if (khataUser === "jeevikadidigreennursery" && khataPwd === "Jeevika") {
+      setIsKhataLoggedIn(true);
+      setShowKhataModal(false);
+      setKhataError("");
+      setKhataUser("");
+      setKhataPwd("");
+      setActiveSection("khataBahi");
+    } else {
+      setKhataError("गलत यूजरनेम या पासवर्ड!");
+    }
+  }
+
+  function handleKhataLogout() {
+    setIsKhataLoggedIn(false);
+    setActiveSection("home");
+  }
+
   // ── Nav ──
   function navigate(section: string) {
     if (section === "ledger" && !isLoggedIn) {
       setShowLoginModal(true);
+    } else if (section === "khataBahi" && !isKhataLoggedIn) {
+      setShowKhataModal(true);
     } else {
       setActiveSection(section);
     }
     setMenuOpen(false);
   }
-
-  // ── Add bill ──
-  async function handleAddBill(e: React.FormEvent) {
-    e.preventDefault();
-    if (!formData.block || !formData.panchayat) {
-      alert("ब्लॉक और पंचायत का नाम भरें।");
-      return;
-    }
-    if (formItems.length === 0) {
-      alert("कम से कम एक पौधा जोड़ें।");
-      return;
-    }
-    const items: ParsedItem[] = [];
-    let totalAmount = 0;
-    for (const row of formItems) {
-      const plantName =
-        row.plant === "OTHER" ? row.customPlant.trim() : row.plant;
-      if (!plantName || !row.quantity || !row.price) {
-        alert("सभी पौधों की जानकारी भरें।");
-        return;
-      }
-      const subtotal = row.quantity * row.price;
-      items.push({
-        plant: plantName,
-        quantity: row.quantity,
-        price: row.price,
-        subtotal,
-      });
-      totalAmount += subtotal;
-    }
-    setFormSubmitting(true);
-    try {
-      await actor!.addBill(
-        formData.block,
-        formData.panchayat,
-        formData.customerName,
-        formData.billNo,
-        formData.billDate,
-        formData.workCode,
-        formData.paymentDate,
-        formData.prsName,
-        formData.mobile,
-        JSON.stringify(items),
-        totalAmount,
-      );
-      setFormData({
-        block: "",
-        panchayat: "",
-        customerName: "",
-        billNo: "",
-        billDate: today,
-        workCode: "",
-        paymentDate: "",
-        prsName: "",
-        mobile: "",
-      });
-      setFormItems([emptyItem()]);
-      await loadBills();
-      alert("बिल सेव हो गया!");
-    } catch {
-      alert("बिल सेव नहीं हो सका। कृपया पुनः प्रयास करें।");
-    } finally {
-      setFormSubmitting(false);
-    }
-  }
-
-  // ── Edit bill open ──
-  function openEditBill(bill: Bill) {
-    setEditingBill(bill);
-    setEditData({
-      block: bill.block,
-      panchayat: bill.panchayat,
-      customerName: bill.customerName,
-      billNo: bill.billNo,
-      billDate: bill.billDate,
-      workCode: bill.workCode,
-      paymentDate: bill.paymentDate,
-      prsName: bill.prsName,
-      mobile: bill.mobile,
-    });
-    const parsedItems: ParsedItem[] = JSON.parse(bill.itemsJson || "[]");
-    setEditItems(
-      parsedItems.map((it) => ({
-        plant: PLANT_LIST.includes(it.plant) ? it.plant : "OTHER",
-        customPlant: PLANT_LIST.includes(it.plant) ? "" : it.plant,
-        quantity: it.quantity,
-        price: it.price,
-      })),
-    );
-    setShowEditModal(true);
-  }
-
-  // ── Update bill ──
-  async function handleUpdateBill(e: React.FormEvent) {
-    e.preventDefault();
-    if (!editingBill) return;
-    const items: ParsedItem[] = [];
-    let totalAmount = 0;
-    for (const row of editItems) {
-      const plantName =
-        row.plant === "OTHER" ? row.customPlant.trim() : row.plant;
-      if (!plantName || !row.quantity || !row.price) {
-        alert("सभी पौधों की जानकारी भरें।");
-        return;
-      }
-      const subtotal = row.quantity * row.price;
-      items.push({
-        plant: plantName,
-        quantity: row.quantity,
-        price: row.price,
-        subtotal,
-      });
-      totalAmount += subtotal;
-    }
-    setEditSubmitting(true);
-    try {
-      await actor!.updateBill(
-        editingBill.id,
-        editData.block,
-        editData.panchayat,
-        editData.customerName,
-        editData.billNo,
-        editData.billDate,
-        editData.workCode,
-        editData.paymentDate,
-        editData.prsName,
-        editData.mobile,
-        JSON.stringify(items),
-        totalAmount,
-        editingBill.timestamp,
-      );
-      setShowEditModal(false);
-      setEditingBill(null);
-      await loadBills();
-      alert("बिल अपडेट हो गया!");
-    } catch {
-      alert("बिल अपडेट नहीं हो सका।");
-    } finally {
-      setEditSubmitting(false);
-    }
-  }
-
-  // ── Delete bill ──
-  async function handleDeleteBill(id: bigint) {
-    if (!confirm("क्या आप वाकई इस बिल को डिलीट करना चाहते हैं?")) return;
-    try {
-      await actor!.deleteBill(id);
-      await loadBills();
-    } catch {
-      alert("डिलीट नहीं हो सका।");
-    }
-  }
-
-  // ── Delete location ──
-  async function handleDeleteLocation(block: string, panchayat: string) {
-    if (!confirm(`क्या आप ${block} - ${panchayat} के सभी बिल डिलीट करना चाहते हैं?`))
-      return;
-    const locationBills = bills.filter(
-      (b) => b.block === block && b.panchayat === panchayat,
-    );
-    try {
-      await Promise.all(locationBills.map((b) => actor!.deleteBill(b.id)));
-      await loadBills();
-      if (
-        detailLocation?.block === block &&
-        detailLocation?.panchayat === panchayat
-      ) {
-        setDetailLocation(null);
-      }
-    } catch {
-      alert("डिलीट नहीं हो सका।");
-    }
-  }
-
-  // ── Computed ──
-  const filteredBills = bills.filter((b) => {
-    const { block, panchayat, customer } = activeSearch;
-    return (
-      (!block || b.block.toLowerCase().includes(block.toLowerCase())) &&
-      (!panchayat ||
-        b.panchayat.toLowerCase().includes(panchayat.toLowerCase())) &&
-      (!customer ||
-        b.customerName.toLowerCase().includes(customer.toLowerCase()))
-    );
-  });
-
-  const locationMap = new Map<
-    string,
-    {
-      block: string;
-      panchayat: string;
-      bills: Bill[];
-      customers: Set<string>;
-      total: number;
-    }
-  >();
-  for (const b of filteredBills) {
-    const key = `${b.block}|${b.panchayat}`;
-    if (!locationMap.has(key)) {
-      locationMap.set(key, {
-        block: b.block,
-        panchayat: b.panchayat,
-        bills: [],
-        customers: new Set(),
-        total: 0,
-      });
-    }
-    const loc = locationMap.get(key)!;
-    loc.bills.push(b);
-    if (b.customerName) loc.customers.add(b.customerName);
-    loc.total += b.total;
-  }
-
-  const uniqueBlocks = [...new Set(bills.map((b) => b.block).filter(Boolean))];
-  const uniquePanchayats = [
-    ...new Set(bills.map((b) => b.panchayat).filter(Boolean)),
-  ];
-  const uniqueCustomers = [
-    ...new Set(bills.map((b) => b.customerName).filter(Boolean)),
-  ];
-
-  // ── Render Sections ──
 
   function renderHome() {
     return (
@@ -1014,21 +853,217 @@ export default function App() {
   function renderLedger() {
     if (!isLoggedIn) return null;
 
+    const amount = computeAmount(sbRate, sbQty);
+    const pending = computePending(sbRate, sbQty, sbTransport, sbPaid);
+    const panchayatOptions = PANCHAYAT_MAP[sbBlock] || [];
+
+    let filtered = [...smartBills];
+    if (filterBlock) filtered = filtered.filter((b) => b.block === filterBlock);
+    if (filterPanchayat)
+      filtered = filtered.filter((b) => b.panchayat === filterPanchayat);
+    if (filterBillNo)
+      filtered = filtered.filter((b) =>
+        b.billNumber.toLowerCase().includes(filterBillNo.toLowerCase()),
+      );
+    if (filterMaterial)
+      filtered = filtered.filter((b) =>
+        b.material.toLowerCase().includes(filterMaterial.toLowerCase()),
+      );
+    if (filterYear)
+      filtered = filtered.filter((b) => b.financialYear === filterYear);
+    if (filterPayment === "paid")
+      filtered = filtered.filter((b) => b.pending === 0);
+    if (filterPayment === "partial")
+      filtered = filtered.filter(
+        (b) => b.pending > 0 && b.pending < b.amount + (b.transport || 0),
+      );
+    if (filterPayment === "pending")
+      filtered = filtered.filter(
+        (b) => b.pending === b.amount + (b.transport || 0),
+      );
+
+    const uniqueFilterBlocks = [
+      ...new Set(smartBills.map((b) => b.block)),
+    ].sort();
+    const uniqueFilterPanchayats = filterBlock
+      ? [
+          ...new Set(
+            smartBills
+              .filter((b) => b.block === filterBlock)
+              .map((b) => b.panchayat),
+          ),
+        ].sort()
+      : [...new Set(smartBills.map((b) => b.panchayat))].sort();
+    const uniqueYears = [
+      ...new Set(smartBills.map((b) => b.financialYear)),
+    ].sort();
+
+    const fAmt = filtered.reduce((s, b) => s + b.amount, 0);
+    const fTrans = filtered.reduce((s, b) => s + (b.transport || 0), 0);
+    const fPaid = filtered.reduce((s, b) => s + (b.paid || 0), 0);
+    const fPending = filtered.reduce((s, b) => s + (b.pending || 0), 0);
+    const fGrand = fAmt + fTrans;
+
+    function resetForm() {
+      setSbBlock("");
+      setSbPanchayat("");
+      setSbBillNumber("");
+      setSbMaterial("");
+      setSbVendor("RUKMINA DEVI");
+      setSbRate("");
+      setSbQty("");
+      setSbTransport("0");
+      setSbPaid("0");
+      setSbDate(today);
+      setSbFinYear(globalFinancialYear);
+      setEditingSmartBill(null);
+    }
+
+    function handleSaveBill(e: React.FormEvent) {
+      e.preventDefault();
+      if (
+        !sbBlock ||
+        !sbPanchayat ||
+        !sbMaterial ||
+        !sbRate ||
+        !sbQty ||
+        !sbDate
+      ) {
+        alert("सभी आवश्यक फील्ड भरें");
+        return;
+      }
+      const rate = Number.parseFloat(sbRate);
+      const qty = Number.parseFloat(sbQty);
+      if (Number.isNaN(rate) || rate <= 0 || Number.isNaN(qty) || qty <= 0) {
+        alert("दर और मात्रा सही भरें");
+        return;
+      }
+      const amt = rate * qty;
+      const trans = Number.parseFloat(sbTransport) || 0;
+      const paid = Number.parseFloat(sbPaid) || 0;
+      const pend = Math.max(0, amt + trans - paid);
+      const billNo = sbBillNumber.trim() || generateBillNumber(smartBills);
+      const newBill: SmartBill = {
+        id: editingSmartBill?.id || Date.now(),
+        billNumber: billNo,
+        date: sbDate,
+        state: "बिहार",
+        district: "पूर्वी चंपारण",
+        block: sbBlock,
+        panchayat: sbPanchayat,
+        material: sbMaterial,
+        rate,
+        quantity: qty,
+        amount: amt,
+        transport: trans,
+        paid,
+        pending: pend,
+        vendor: sbVendor || "RUKMINA DEVI",
+        financialYear: sbFinYear || globalFinancialYear,
+      };
+      let updated: SmartBill[];
+      if (editingSmartBill) {
+        updated = smartBills.map((b) =>
+          b.id === editingSmartBill.id ? newBill : b,
+        );
+      } else {
+        updated = [...smartBills, newBill];
+      }
+      saveBillsToStorage(updated);
+      setSmartBills(updated);
+      resetForm();
+      alert(`✅ बिल सुरक्षित | बिल नं: ${billNo}`);
+    }
+
+    function handleEditBill(bill: SmartBill) {
+      setEditingSmartBill(bill);
+      setSbBlock(bill.block);
+      setSbPanchayat(bill.panchayat);
+      setSbBillNumber(bill.billNumber);
+      setSbMaterial(bill.material);
+      setSbVendor(bill.vendor);
+      setSbRate(String(bill.rate));
+      setSbQty(String(bill.quantity));
+      setSbTransport(String(bill.transport || 0));
+      setSbPaid(String(bill.paid || 0));
+      setSbDate(bill.date);
+      setSbFinYear(bill.financialYear);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function handleDeleteBill(id: number) {
+      if (confirm("यह बिल हटाना है?")) {
+        const updated = smartBills.filter((b) => b.id !== id);
+        saveBillsToStorage(updated);
+        setSmartBills(updated);
+        if (editingSmartBill?.id === id) resetForm();
+      }
+    }
+
+    function handlePrintFiltered() {
+      if (!filtered.length) {
+        alert("कोई बिल नहीं");
+        return;
+      }
+      const w = window.open("", "_blank");
+      if (w) {
+        w.document.write(
+          generatePrintHTML(filtered, "फ़िल्टर रिपोर्ट", globalFinancialYear),
+        );
+        w.document.close();
+        w.print();
+      }
+    }
+
+    function handlePrintBlockPanchayat() {
+      if (!filterBlock && !filterPanchayat) {
+        alert("पहले ब्लॉक या पंचायत चुनें");
+        return;
+      }
+      let toBePrinted = [...smartBills];
+      let title = "";
+      if (filterBlock && filterPanchayat) {
+        toBePrinted = toBePrinted.filter(
+          (b) => b.block === filterBlock && b.panchayat === filterPanchayat,
+        );
+        title = `ब्लॉक: ${filterBlock} | पंचायत: ${filterPanchayat}`;
+      } else if (filterBlock) {
+        toBePrinted = toBePrinted.filter((b) => b.block === filterBlock);
+        title = `ब्लॉक: ${filterBlock}`;
+      } else {
+        toBePrinted = toBePrinted.filter(
+          (b) => b.panchayat === filterPanchayat,
+        );
+        title = `पंचायत: ${filterPanchayat}`;
+      }
+      if (!toBePrinted.length) {
+        alert("कोई बिल नहीं");
+        return;
+      }
+      const w = window.open("", "_blank");
+      if (w) {
+        w.document.write(
+          generatePrintHTML(toBePrinted, title, globalFinancialYear),
+        );
+        w.document.close();
+        w.print();
+      }
+    }
+
     return (
       <div className="section">
-        {/* Header */}
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: "1.5rem",
+            marginBottom: "1rem",
             flexWrap: "wrap",
             gap: "0.75rem",
           }}
         >
           <h2 className="section-title" style={{ marginBottom: 0 }}>
-            <i className="fas fa-book" /> 📒 ब्लॉक/पंचायत वार खाता बही
+            🌱 जीविका दीदी ग्रीन नर्सरी — स्मार्ट बिलिंग सिस्टम
           </h2>
           <button
             type="button"
@@ -1040,618 +1075,1326 @@ export default function App() {
           </button>
         </div>
 
-        {/* Add Bill Form */}
-        <div className="ledger-form-card">
-          <h2>
-            <i className="fas fa-plus-circle" /> नया बिल जोड़ें
-          </h2>
-          <form onSubmit={handleAddBill}>
-            <div className="form-row">
+        <div
+          style={{
+            background: "#fef9e3",
+            color: "#2c5a2e",
+            padding: "10px 16px",
+            borderRadius: "16px",
+            marginBottom: "1.5rem",
+            fontSize: "0.8rem",
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "space-between",
+            gap: "8px",
+          }}
+        >
+          <span>🌿 जीविका दीदी ग्रीन नर्सरी, प्लांटेशन-गेबियन (बांस गेबियन)</span>
+          <span>📍 पकरिया, अजगरी, बंजरिया, पूर्वी चंपारण, 845401</span>
+          <span>📞 8292480148, 9504800073</span>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "#f0f7ed",
+              padding: "2px 10px",
+              borderRadius: "40px",
+            }}
+          >
+            📅 {globalFinancialYear}
+            <button
+              type="button"
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: 0,
+                color: "#2b8c4a",
+                fontSize: "0.75rem",
+              }}
+              onClick={() => {
+                const ny = prompt(
+                  "वित्तीय वर्ष बदलें (उदा: 2025-2026):",
+                  globalFinancialYear,
+                );
+                if (ny?.trim()) setGlobalFinancialYear(ny.trim());
+              }}
+            >
+              <i className="fas fa-pencil-alt" />
+            </button>
+          </span>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gap: "1.5rem",
+            marginBottom: "1.5rem",
+          }}
+        >
+          <div className="ledger-form-card">
+            <h2>{editingSmartBill ? "✏️ बिल संपादित करें" : "🧾 नया बिल जोड़ें"}</h2>
+            <form onSubmit={handleSaveBill}>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="sb-state">राज्य</label>
+                  <input
+                    id="sb-state"
+                    type="text"
+                    className="form-input"
+                    value="बिहार"
+                    readOnly
+                    style={{ background: "#f0f3ec" }}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="sb-district">जिला</label>
+                  <input
+                    id="sb-district"
+                    type="text"
+                    className="form-input"
+                    value="पूर्वी चंपारण"
+                    readOnly
+                    style={{ background: "#f0f3ec" }}
+                  />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="sb-block">ब्लॉक *</label>
+                  <select
+                    id="sb-block"
+                    className="form-input"
+                    value={sbBlock}
+                    required
+                    onChange={(e) => {
+                      setSbBlock(e.target.value);
+                      setSbPanchayat("");
+                    }}
+                    data-ocid="ledger.block.select"
+                  >
+                    <option value="">-- ब्लॉक चुनें --</option>
+                    {ALL_BLOCKS.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="sb-panchayat">पंचायत *</label>
+                  <select
+                    id="sb-panchayat"
+                    className="form-input"
+                    value={sbPanchayat}
+                    required
+                    onChange={(e) => setSbPanchayat(e.target.value)}
+                    data-ocid="ledger.panchayat.select"
+                  >
+                    <option value="">-- पंचायत चुनें --</option>
+                    {panchayatOptions.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                    {panchayatOptions.length === 0 && sbBlock && (
+                      <option value="ग्राम पंचायत 1">ग्राम पंचायत 1</option>
+                    )}
+                  </select>
+                </div>
+              </div>
               <div className="form-group">
-                <label htmlFor="field-1">
-                  ब्लॉक <span style={{ color: "red" }}>*</span>
+                <label htmlFor="sb-billno">
+                  बिल नंबर (खाली छोड़ें तो अपने आप बनेगा)
                 </label>
                 <input
-                  id="field-1"
                   type="text"
                   className="form-input"
-                  list="blockList"
-                  placeholder="ब्लॉक का नाम"
-                  required
-                  value={formData.block}
-                  onChange={(e) =>
-                    setFormData({ ...formData, block: e.target.value })
-                  }
-                  data-ocid="ledger.block.input"
-                />
-                <datalist id="blockList">
-                  {uniqueBlocks.map((b) => (
-                    <option key={b} value={b} />
-                  ))}
-                </datalist>
-              </div>
-              <div className="form-group">
-                <label htmlFor="field-2">
-                  पंचायत <span style={{ color: "red" }}>*</span>
-                </label>
-                <input
-                  id="field-2"
-                  type="text"
-                  className="form-input"
-                  list="panchayatList"
-                  placeholder="पंचायत का नाम"
-                  required
-                  value={formData.panchayat}
-                  onChange={(e) =>
-                    setFormData({ ...formData, panchayat: e.target.value })
-                  }
-                  data-ocid="ledger.panchayat.input"
-                />
-                <datalist id="panchayatList">
-                  {uniquePanchayats.map((p) => (
-                    <option key={p} value={p} />
-                  ))}
-                </datalist>
-              </div>
-              <div className="form-group">
-                <label htmlFor="field-3">ग्राहक नाम</label>
-                <input
-                  id="field-3"
-                  type="text"
-                  className="form-input"
-                  list="customerList"
-                  placeholder="वैकल्पिक"
-                  value={formData.customerName}
-                  onChange={(e) =>
-                    setFormData({ ...formData, customerName: e.target.value })
-                  }
-                  data-ocid="ledger.customer.input"
-                />
-                <datalist id="customerList">
-                  {uniqueCustomers.map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-              </div>
-            </div>
-            <div className="form-row">
-              <div className="form-group">
-                <label htmlFor="field-4">बिल नंबर</label>
-                <input
-                  id="field-4"
-                  type="text"
-                  className="form-input"
-                  placeholder="बिल नं."
-                  value={formData.billNo}
-                  onChange={(e) =>
-                    setFormData({ ...formData, billNo: e.target.value })
-                  }
+                  placeholder="अपने आप जनरेट होगा"
+                  value={sbBillNumber}
+                  onChange={(e) => setSbBillNumber(e.target.value)}
+                  id="sb-billno"
                   data-ocid="ledger.billno.input"
                 />
               </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="sb-material">सामग्री *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="जैसे: पौधा, बांस गेबियन"
+                    required
+                    value={sbMaterial}
+                    onChange={(e) => setSbMaterial(e.target.value)}
+                    id="sb-material"
+                    data-ocid="ledger.material.input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="sb-vendor">विक्रेता</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={sbVendor}
+                    onChange={(e) => setSbVendor(e.target.value)}
+                    id="sb-vendor"
+                    data-ocid="ledger.vendor.input"
+                  />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="sb-rate">दर (₹) *</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    step="0.01"
+                    required
+                    placeholder="0.00"
+                    value={sbRate}
+                    onChange={(e) => setSbRate(e.target.value)}
+                    id="sb-rate"
+                    data-ocid="ledger.rate.input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="sb-qty">मात्रा *</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    step="any"
+                    required
+                    placeholder="0"
+                    value={sbQty}
+                    onChange={(e) => setSbQty(e.target.value)}
+                    id="sb-qty"
+                    data-ocid="ledger.qty.input"
+                  />
+                </div>
+              </div>
               <div className="form-group">
-                <label htmlFor="billDate">
-                  बिल दिनांक <span style={{ color: "red" }}>*</span>
+                <label htmlFor="sb-amount">राशि (Auto)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  readOnly
+                  value={amount.toFixed(2)}
+                  style={{ background: "#e9f3e6", fontWeight: "bold" }}
+                />
+              </div>
+              <div
+                style={{
+                  background: "#fff9f0",
+                  padding: "12px",
+                  borderRadius: "12px",
+                  marginBottom: "10px",
+                  borderLeft: "4px solid #e67e22",
+                }}
+              >
+                <label
+                  htmlFor="sb-transport"
+                  style={{
+                    display: "block",
+                    marginBottom: "6px",
+                    fontWeight: 600,
+                    color: "#c0531a",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  🚚 गाड़ी भाड़ा (Transport Charge) ₹
                 </label>
                 <input
-                  id="billDate"
-                  type="date"
+                  id="sb-transport"
+                  type="number"
                   className="form-input"
-                  required
-                  value={formData.billDate}
-                  onChange={(e) =>
-                    setFormData({ ...formData, billDate: e.target.value })
-                  }
-                  data-ocid="ledger.billdate.input"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={sbTransport}
+                  onChange={(e) => setSbTransport(e.target.value)}
+                  data-ocid="ledger.transport.input"
                 />
+                <small style={{ color: "#e67e22", fontSize: "0.75rem" }}>
+                  यह राशि अलग से जुड़ेगी
+                </small>
               </div>
-              <div className="form-group">
-                <label htmlFor="field-5">वर्क कोड</label>
-                <input
-                  id="field-5"
-                  type="text"
-                  className="form-input"
-                  placeholder="वर्क कोड"
-                  value={formData.workCode}
-                  onChange={(e) =>
-                    setFormData({ ...formData, workCode: e.target.value })
-                  }
-                  data-ocid="ledger.workcode.input"
-                />
-              </div>
-            </div>
-            <div className="form-row">
-              <div className="form-group">
-                <label htmlFor="paymentDate">भुगतान दिनांक</label>
-                <input
-                  id="paymentDate"
-                  type="date"
-                  className="form-input"
-                  value={formData.paymentDate}
-                  onChange={(e) =>
-                    setFormData({ ...formData, paymentDate: e.target.value })
-                  }
-                  data-ocid="ledger.paymentdate.input"
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="field-6">P.R.S नाम</label>
-                <input
-                  id="field-6"
-                  type="text"
-                  className="form-input"
-                  list="prsList"
-                  placeholder="P.R.S नाम"
-                  value={formData.prsName}
-                  onChange={(e) =>
-                    setFormData({ ...formData, prsName: e.target.value })
-                  }
-                  data-ocid="ledger.prs.input"
-                />
-                <datalist id="prsList">
-                  {[
-                    ...new Set(bills.map((b) => b.prsName).filter(Boolean)),
-                  ].map((p) => (
-                    <option key={p} value={p} />
-                  ))}
-                </datalist>
-              </div>
-              <div className="form-group">
-                <label htmlFor="field-7">मोबाइल नंबर</label>
-                <input
-                  id="field-7"
-                  type="tel"
-                  className="form-input"
-                  placeholder="98xxxxxx"
-                  value={formData.mobile}
-                  onChange={(e) =>
-                    setFormData({ ...formData, mobile: e.target.value })
-                  }
-                  data-ocid="ledger.mobile.input"
-                />
-              </div>
-            </div>
-
-            {/* Plant items */}
-            <div className="items-section">
-              <div className="items-section-title">
-                <i className="fas fa-leaf" /> पौधों की सूची
-              </div>
-              {formItems.map((item, i) => (
-                <PlantItemRow
-                  key={`form-${i}-${item.plant}`}
-                  item={item}
-                  index={i}
-                  prefix="ledger.plant"
-                  onChange={(idx, updated) => {
-                    setFormItems((prev) =>
-                      prev.map((it, j) => (j === idx ? updated : it)),
-                    );
-                  }}
-                  onRemove={(idx) =>
-                    setFormItems((prev) => prev.filter((_, j) => j !== idx))
-                  }
-                />
-              ))}
-              <button
-                type="button"
-                className="btn"
+              <div
                 style={{
-                  background: "var(--secondary)",
-                  color: "var(--dark-green)",
-                  marginTop: "0.5rem",
+                  background: "#f0f7ff",
+                  padding: "12px",
+                  borderRadius: "12px",
+                  marginBottom: "10px",
+                  borderLeft: "4px solid #2196f3",
                 }}
-                onClick={() => setFormItems((prev) => [...prev, emptyItem()])}
-                data-ocid="ledger.add.button"
               >
-                <i className="fas fa-plus" /> और पौधा जोड़ें
-              </button>
-            </div>
-
-            <button
-              type="submit"
-              className="btn"
-              disabled={formSubmitting}
-              data-ocid="ledger.submit_button"
-            >
-              {formSubmitting ? (
-                <>
-                  <i className="fas fa-spinner fa-spin" /> सेव हो रहा है...
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-save" /> बिल सेव करें
-                </>
-              )}
-            </button>
-          </form>
-        </div>
-
-        {/* Search */}
-        <div className="search-section">
-          <h3>
-            <i className="fas fa-search" /> ब्लॉक / पंचायत से खोजें
-          </h3>
-          <div className="search-row">
-            <input
-              type="text"
-              className="form-input"
-              list="blockList2"
-              placeholder="ब्लॉक से खोजें"
-              value={searchBlock}
-              onChange={(e) => setSearchBlock(e.target.value)}
-              data-ocid="ledger.search_input"
-            />
-            <datalist id="blockList2">
-              {uniqueBlocks.map((b) => (
-                <option key={b} value={b} />
-              ))}
-            </datalist>
-            <input
-              type="text"
-              className="form-input"
-              list="panchayatList2"
-              placeholder="पंचायत से खोजें"
-              value={searchPanchayat}
-              onChange={(e) => setSearchPanchayat(e.target.value)}
-            />
-            <datalist id="panchayatList2">
-              {uniquePanchayats.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-            <input
-              type="text"
-              className="form-input"
-              placeholder="ग्राहक नाम से"
-              value={searchCustomer}
-              onChange={(e) => setSearchCustomer(e.target.value)}
-            />
-            <button
-              type="button"
-              className="btn"
-              onClick={() =>
-                setActiveSearch({
-                  block: searchBlock,
-                  panchayat: searchPanchayat,
-                  customer: searchCustomer,
-                })
-              }
-              data-ocid="ledger.primary_button"
-            >
-              <i className="fas fa-search" /> खोजें
-            </button>
-            <button
-              type="button"
-              className="btn"
-              style={{
-                background: "var(--secondary)",
-                color: "var(--dark-green)",
-              }}
-              onClick={() => {
-                setSearchBlock("");
-                setSearchPanchayat("");
-                setSearchCustomer("");
-                setActiveSearch({ block: "", panchayat: "", customer: "" });
-              }}
-              data-ocid="ledger.secondary_button"
-            >
-              रीसेट
-            </button>
-          </div>
-        </div>
-
-        {/* Loading / Error */}
-        {billsLoading && (
-          <div className="spinner">
-            <div className="spinner-icon" />
-          </div>
-        )}
-        {billsError && (
-          <div className="error-msg" data-ocid="ledger.error_state">
-            {billsError}
-          </div>
-        )}
-
-        {/* Location cards */}
-        {!billsLoading && (
-          <div className="location-cards-grid" data-ocid="ledger.list">
-            {locationMap.size === 0 ? (
-              <p
-                style={{ color: "#888", fontSize: "0.9rem" }}
-                data-ocid="ledger.empty_state"
-              >
-                कोई डेटा नहीं मिला।
-              </p>
-            ) : (
-              Array.from(locationMap.values()).map((loc, idx) => (
-                <div
-                  className="location-card"
-                  key={`${loc.block}|${loc.panchayat}`}
-                  data-ocid={`ledger.item.${idx + 1}`}
-                >
-                  <div className="location-card-header">
-                    <div>
-                      <h3>{loc.block || "—"}</h3>
-                      <h4>
-                        <i
-                          className="fas fa-map-marker-alt"
-                          style={{ marginRight: "4px" }}
-                        />
-                        {loc.panchayat || "—"}
-                      </h4>
-                    </div>
-                    <div className="location-card-actions">
-                      <button
-                        type="button"
-                        className="icon-btn edit"
-                        title="एडिट करें"
-                        data-ocid={`ledger.edit_button.${idx + 1}`}
-                        onClick={() => {
-                          const latest = [...loc.bills].sort((a, b) =>
-                            (b.billDate || "").localeCompare(a.billDate || ""),
-                          )[0];
-                          if (latest) openEditBill(latest);
-                        }}
-                      >
-                        <i className="fas fa-edit" />
-                      </button>
-                      <button
-                        type="button"
-                        className="icon-btn danger"
-                        title="डिलीट करें"
-                        data-ocid={`ledger.delete_button.${idx + 1}`}
-                        onClick={() =>
-                          handleDeleteLocation(loc.block, loc.panchayat)
-                        }
-                      >
-                        <i className="fas fa-trash" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="location-card-stats">
-                    <span>
-                      <i className="fas fa-users" /> ग्राहक: {loc.customers.size}
-                    </span>
-                    <span>
-                      <i className="fas fa-file-invoice" /> बिल:{" "}
-                      {loc.bills.length}
-                    </span>
-                    <span>
-                      <i className="fas fa-rupee-sign" /> ₹
-                      {loc.total.toFixed(0)}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    className="badge-view"
-                    onClick={() =>
-                      setDetailLocation({
-                        block: loc.block,
-                        panchayat: loc.panchayat,
-                      })
-                    }
-                  >
-                    <i className="fas fa-eye" /> क्षेत्र का खाता देखें
-                  </button>
-
-                  {/* Customer list */}
-                  <div className="customer-list">
-                    <div className="customer-list-title">
-                      <i className="fas fa-user" /> ग्राहक:
-                    </div>
-                    {Array.from(
-                      loc.bills.reduce((acc, bill) => {
-                        const name = bill.customerName || "अज्ञात";
-                        if (!acc.has(name))
-                          acc.set(name, { total: 0, bills: [] as Bill[] });
-                        acc.get(name)!.total += bill.total;
-                        acc.get(name)!.bills.push(bill);
-                        return acc;
-                      }, new Map<string, { total: number; bills: Bill[] }>()),
-                    ).map(([name, data]) => (
-                      <div className="customer-item" key={name}>
-                        <div className="customer-name">
-                          {name} — ₹{data.total.toFixed(0)} ({data.bills.length}{" "}
-                          बिल)
-                        </div>
-                        {data.bills
-                          .sort((a, b) =>
-                            (b.billDate || "").localeCompare(a.billDate || ""),
-                          )
-                          .map((bill, bi) => (
-                            <div className="bill-item" key={String(bill.id)}>
-                              <div className="bill-item-info">
-                                <strong>बिल #{bill.billNo || "—"}</strong> — ₹
-                                {bill.total.toFixed(0)}
-                                <span
-                                  style={{
-                                    marginLeft: "0.4rem",
-                                    color: "#777",
-                                  }}
-                                >
-                                  {bill.billDate}
-                                </span>
-                              </div>
-                              <div className="bill-item-actions">
-                                <button
-                                  type="button"
-                                  className="icon-btn edit"
-                                  title="एडिट"
-                                  onClick={() => openEditBill(bill)}
-                                  data-ocid={`ledger.edit_button.${bi + 1}`}
-                                >
-                                  <i className="fas fa-edit" />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="icon-btn danger"
-                                  title="डिलीट"
-                                  onClick={() => handleDeleteBill(bill.id)}
-                                  data-ocid={`ledger.delete_button.${bi + 1}`}
-                                >
-                                  <i className="fas fa-trash" />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="icon-btn"
-                                  title="प्रिंट"
-                                  onClick={() => printSingleBill(bill)}
-                                  style={{ color: "#555" }}
-                                >
-                                  <i className="fas fa-print" />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-
-        {/* Ledger detail */}
-        {detailLocation &&
-          (() => {
-            const { block, panchayat } = detailLocation;
-            const detailBills = bills
-              .filter((b) => b.block === block && b.panchayat === panchayat)
-              .sort((a, b) =>
-                (a.billDate || "").localeCompare(b.billDate || ""),
-              );
-            const grandTotal = detailBills.reduce((s, b) => s + b.total, 0);
-            return (
-              <div className="ledger-detail" data-ocid="ledger.panel">
                 <div
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "1rem",
-                    flexWrap: "wrap",
-                    gap: "0.5rem",
+                    display: "block",
+                    marginBottom: "6px",
+                    fontWeight: 600,
+                    color: "#1565c0",
+                    fontSize: "0.85rem",
                   }}
                 >
-                  <h3 style={{ color: "var(--primary)" }}>
-                    {block} - {panchayat} का विस्तृत खाता
-                  </h3>
-                  <div style={{ display: "flex", gap: "0.5rem" }}>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() =>
-                        printLocationLedger(block, panchayat, bills)
-                      }
-                      data-ocid="ledger.primary_button"
-                    >
-                      <i className="fas fa-print" /> प्रिंट करें
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline"
-                      onClick={() => setDetailLocation(null)}
-                      data-ocid="ledger.close_button"
-                    >
-                      <i className="fas fa-times" /> बंद करें
-                    </button>
+                  💰 भुगतान स्थिति
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label htmlFor="sb-paid">प्राप्त राशि (Paid) ₹</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={sbPaid}
+                      onChange={(e) => setSbPaid(e.target.value)}
+                      data-ocid="ledger.paid.input"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="sb-pending">बकाया राशि (Pending) ₹</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      readOnly
+                      value={pending.toFixed(2)}
+                      style={{ background: "#fff0e0", fontWeight: "bold" }}
+                    />
                   </div>
                 </div>
-                <p style={{ marginBottom: "1rem", color: "#555" }}>
-                  <strong>कुल बिल:</strong> {detailBills.length} |{" "}
-                  <strong>कुल राशि:</strong> ₹{grandTotal.toFixed(0)}
-                </p>
-                <div style={{ overflowX: "auto" }}>
-                  <table className="ledger-table">
-                    <thead>
-                      <tr>
-                        <th>ग्राहक नाम</th>
-                        <th>ब्लॉक</th>
-                        <th>पंचायत</th>
-                        <th>P.R.S नाम</th>
-                        <th>मोबाइल</th>
-                        <th>वर्क कोड</th>
-                        <th>भुगतान तिथि</th>
-                        <th>बिल नं.</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detailBills.map((t) => {
-                        const items: ParsedItem[] = JSON.parse(
-                          t.itemsJson || "[]",
-                        );
-                        return (
-                          <>
-                            <tr
-                              key={`sep-${String(t.id)}`}
-                              className="bill-separator"
-                            >
-                              <td colSpan={8}>
-                                बिल: {t.billNo || "—"} | दिनांक: {t.billDate} |
-                                ग्राहक: {t.customerName}
-                              </td>
-                            </tr>
-                            <tr key={`info-${String(t.id)}`}>
-                              <td>{t.customerName}</td>
-                              <td>{t.block}</td>
-                              <td>{t.panchayat}</td>
-                              <td>{t.prsName}</td>
-                              <td>{t.mobile}</td>
-                              <td>{t.workCode}</td>
-                              <td>{t.paymentDate || "—"}</td>
-                              <td>{t.billNo}</td>
-                            </tr>
-                            <tr
-                              key={`hdr-${String(t.id)}`}
-                              style={{ background: "#e1f0d8" }}
-                            >
-                              <th colSpan={2}>पौधे का नाम</th>
-                              <th>मात्रा</th>
-                              <th>दर (₹)</th>
-                              <th>कुल (₹)</th>
-                              <th colSpan={3} />
-                            </tr>
-                            {items.map((it, ii) => (
-                              <tr key={`item-${String(t.id)}-${ii}`}>
-                                <td colSpan={2}>{it.plant}</td>
-                                <td>{it.quantity}</td>
-                                <td>₹{it.price}</td>
-                                <td>₹{(it.quantity * it.price).toFixed(0)}</td>
-                                <td colSpan={3} />
-                              </tr>
-                            ))}
-                            <tr
-                              key={`total-${String(t.id)}`}
-                              style={{
-                                borderTop: "2px solid #2d6a4f",
-                                background: "#f5f5dc",
-                              }}
-                            >
-                              <td colSpan={4} style={{ textAlign: "right" }}>
-                                <strong>इस बिल का योग</strong>
-                              </td>
-                              <td>
-                                <strong>₹{t.total.toFixed(0)}</strong>
-                              </td>
-                              <td colSpan={3} />
-                            </tr>
-                          </>
-                        );
-                      })}
-                      <tr className="grand-total-row">
-                        <td colSpan={4} style={{ textAlign: "right" }}>
-                          सभी बिलों का कुल योग
-                        </td>
-                        <td colSpan={4}>₹{grandTotal.toFixed(0)}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                <small style={{ color: "#2196f3", fontSize: "0.75rem" }}>
+                  प्राप्त राशि डालें, बकाया अपने आप कैलकुलेट होगा
+                </small>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="sb-date">तिथि *</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    required
+                    value={sbDate}
+                    onChange={(e) => setSbDate(e.target.value)}
+                    id="sb-date"
+                    data-ocid="ledger.date.input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="sb-finyear">वित्तीय वर्ष</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={sbFinYear}
+                    onChange={(e) => setSbFinYear(e.target.value)}
+                    id="sb-finyear"
+                    data-ocid="ledger.finyear.input"
+                  />
                 </div>
               </div>
-            );
-          })()}
+              <div
+                style={{
+                  background: "#eef5ea",
+                  padding: "10px",
+                  borderRadius: "12px",
+                  fontWeight: "bold",
+                  textAlign: "center",
+                  margin: "10px 0",
+                  fontSize: "0.9rem",
+                }}
+              >
+                💰 कुल राशि (बिना गाड़ी): ₹ {amount.toFixed(2)}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                  marginTop: "10px",
+                }}
+              >
+                <button
+                  type="submit"
+                  className="btn"
+                  style={{ flex: 1 }}
+                  data-ocid="ledger.submit_button"
+                >
+                  💾 बिल सेव करें
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ flex: 1 }}
+                  onClick={resetForm}
+                  data-ocid="ledger.secondary_button"
+                >
+                  🔄 नया / साफ
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div className="ledger-form-card">
+            <h2>🔍 खोजें &amp; फ़िल्टर</h2>
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "10px" }}
+            >
+              <div className="form-row">
+                <select
+                  className="form-input"
+                  value={filterBlock}
+                  onChange={(e) => {
+                    setFilterBlock(e.target.value);
+                    setFilterPanchayat("");
+                  }}
+                  data-ocid="ledger.block.select"
+                >
+                  <option value="">सभी ब्लॉक</option>
+                  {uniqueFilterBlocks.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="form-input"
+                  value={filterPanchayat}
+                  onChange={(e) => setFilterPanchayat(e.target.value)}
+                  data-ocid="ledger.panchayat.select"
+                >
+                  <option value="">सभी पंचायत</option>
+                  {uniqueFilterPanchayats.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-row">
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="बिल नंबर से खोजें"
+                  value={filterBillNo}
+                  onChange={(e) => setFilterBillNo(e.target.value)}
+                  data-ocid="ledger.search_input"
+                />
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="सामग्री से खोजें"
+                  value={filterMaterial}
+                  onChange={(e) => setFilterMaterial(e.target.value)}
+                  data-ocid="ledger.search_input"
+                />
+              </div>
+              <div className="form-row">
+                <select
+                  className="form-input"
+                  value={filterPayment}
+                  onChange={(e) => setFilterPayment(e.target.value)}
+                  data-ocid="ledger.payment.select"
+                >
+                  <option value="">सभी भुगतान स्थिति</option>
+                  <option value="paid">पूर्ण भुगतान (Paid)</option>
+                  <option value="partial">आंशिक भुगतान (Partial)</option>
+                  <option value="pending">बकाया (Pending)</option>
+                </select>
+                <select
+                  className="form-input"
+                  value={filterYear}
+                  onChange={(e) => setFilterYear(e.target.value)}
+                  data-ocid="ledger.year.select"
+                >
+                  <option value="">सभी वित्त वर्ष</option>
+                  {uniqueYears.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => {
+                  setFilterBlock("");
+                  setFilterPanchayat("");
+                  setFilterBillNo("");
+                  setFilterMaterial("");
+                  setFilterYear("");
+                  setFilterPayment("");
+                }}
+                data-ocid="ledger.secondary_button"
+              >
+                रीसेट फ़िल्टर
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={handlePrintFiltered}
+                data-ocid="ledger.primary_button"
+              >
+                🖨️ फ़िल्टर प्रिंट
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={handlePrintBlockPanchayat}
+                data-ocid="ledger.primary_button"
+              >
+                📑 ब्लॉक/पंचायत प्रिंट
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="ledger-form-card">
+          <h2>📋 सभी बिल रिकॉर्ड्स</h2>
+          <div style={{ overflowX: "auto" }}>
+            <table
+              className="ledger-table"
+              style={{ minWidth: "1100px" }}
+              data-ocid="ledger.table"
+            >
+              <thead>
+                <tr>
+                  <th>बिल नंबर</th>
+                  <th>तिथि</th>
+                  <th>ब्लॉक</th>
+                  <th>पंचायत</th>
+                  <th>सामग्री</th>
+                  <th>दर(₹)</th>
+                  <th>मात्रा</th>
+                  <th>राशि(₹)</th>
+                  <th>गाड़ी(₹)</th>
+                  <th>कुल(₹)</th>
+                  <th>प्राप्त(₹)</th>
+                  <th>बकाया(₹)</th>
+                  <th>स्थिति</th>
+                  <th>विक्रेता</th>
+                  <th>वित्त वर्ष</th>
+                  <th>कार्रवाई</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={16}
+                      style={{
+                        textAlign: "center",
+                        color: "#888",
+                        padding: "20px",
+                      }}
+                      data-ocid="ledger.empty_state"
+                    >
+                      कोई बिल नहीं
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((b, idx) => {
+                    const total = b.amount + (b.transport || 0);
+                    const status = getPaymentStatus(b);
+                    return (
+                      <tr key={b.id} data-ocid={`ledger.item.${idx + 1}`}>
+                        <td>
+                          <span
+                            style={{
+                              background: "#2b8c4a20",
+                              padding: "2px 8px",
+                              borderRadius: "12px",
+                              fontSize: "0.7rem",
+                              fontWeight: "bold",
+                              color: "#1e6a3a",
+                            }}
+                          >
+                            {b.billNumber}
+                          </span>
+                        </td>
+                        <td>{b.date}</td>
+                        <td>{b.block}</td>
+                        <td>{b.panchayat}</td>
+                        <td>{b.material}</td>
+                        <td>₹{b.rate}</td>
+                        <td>{b.quantity}</td>
+                        <td>₹{b.amount.toFixed(2)}</td>
+                        <td>₹{(b.transport || 0).toFixed(2)}</td>
+                        <td>₹{total.toFixed(2)}</td>
+                        <td>₹{(b.paid || 0).toFixed(2)}</td>
+                        <td>₹{(b.pending || 0).toFixed(2)}</td>
+                        <td>
+                          <span
+                            style={{
+                              background: status.isPaid ? "#4caf50" : "#ff9800",
+                              color: "white",
+                              padding: "2px 8px",
+                              borderRadius: "12px",
+                              fontSize: "0.7rem",
+                            }}
+                          >
+                            {status.text}
+                          </span>
+                        </td>
+                        <td>{b.vendor}</td>
+                        <td>{b.financialYear}</td>
+                        <td>
+                          <div style={{ display: "flex", gap: "4px" }}>
+                            <button
+                              type="button"
+                              className="icon-btn edit"
+                              onClick={() => handleEditBill(b)}
+                              title="संपादित करें"
+                              data-ocid={`ledger.edit_button.${idx + 1}`}
+                            >
+                              <i className="fas fa-edit" />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-btn danger"
+                              onClick={() => handleDeleteBill(b.id)}
+                              title="हटाएं"
+                              data-ocid={`ledger.delete_button.${idx + 1}`}
+                            >
+                              <i className="fas fa-trash" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "10px",
+              marginTop: "15px",
+            }}
+          >
+            <div
+              style={{
+                background: "#1e3a2f",
+                color: "white",
+                padding: "12px",
+                borderRadius: "14px",
+                textAlign: "center",
+                fontWeight: "bold",
+                fontSize: "0.85rem",
+              }}
+            >
+              💰 बिल: ₹{fAmt.toFixed(2)} | सभी: ₹
+              {smartBills.reduce((s, b) => s + b.amount, 0).toFixed(2)}
+            </div>
+            <div
+              style={{
+                background: "#e67e22",
+                color: "white",
+                padding: "12px",
+                borderRadius: "14px",
+                textAlign: "center",
+                fontWeight: "bold",
+                fontSize: "0.85rem",
+              }}
+            >
+              🚚 गाड़ी: ₹{fTrans.toFixed(2)} | सभी: ₹
+              {smartBills
+                .reduce((s, b) => s + (b.transport || 0), 0)
+                .toFixed(2)}
+            </div>
+            <div
+              style={{
+                background: "#2196f3",
+                color: "white",
+                padding: "12px",
+                borderRadius: "14px",
+                textAlign: "center",
+                fontWeight: "bold",
+                fontSize: "0.85rem",
+              }}
+            >
+              💵 प्राप्त: ₹{fPaid.toFixed(2)} | सभी: ₹
+              {smartBills.reduce((s, b) => s + (b.paid || 0), 0).toFixed(2)}
+            </div>
+            <div
+              style={{
+                background: "#ff9800",
+                color: "white",
+                padding: "12px",
+                borderRadius: "14px",
+                textAlign: "center",
+                fontWeight: "bold",
+                fontSize: "0.85rem",
+              }}
+            >
+              ⏳ बकाया: ₹{fPending.toFixed(2)} | सभी: ₹
+              {smartBills.reduce((s, b) => s + (b.pending || 0), 0).toFixed(2)}
+            </div>
+            <div
+              style={{
+                background: "#2b8c4a",
+                color: "white",
+                padding: "12px",
+                borderRadius: "14px",
+                textAlign: "center",
+                fontWeight: "bold",
+                fontSize: "0.85rem",
+              }}
+            >
+              🌟 योग: ₹{fGrand.toFixed(2)} | सभी: ₹
+              {smartBills
+                .reduce((s, b) => s + b.amount + (b.transport || 0), 0)
+                .toFixed(2)}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderKhataBahi() {
+    if (!isKhataLoggedIn) return null;
+
+    const kbAmount =
+      (Number.parseFloat(kbRate) || 0) * (Number.parseFloat(kbQty) || 0);
+    const kbPending = Math.max(0, kbAmount - (Number.parseFloat(kbPaid) || 0));
+    const kbPanchayatOptions = PANCHAYAT_MAP[kbBlock] || [];
+
+    let kbFiltered = [...khataEntries];
+    if (kbSearchCustomer)
+      kbFiltered = kbFiltered.filter((e) =>
+        e.customerName.toLowerCase().includes(kbSearchCustomer.toLowerCase()),
+      );
+    if (kbFilterBlock)
+      kbFiltered = kbFiltered.filter((e) => e.block === kbFilterBlock);
+    if (kbFilterPanchayat)
+      kbFiltered = kbFiltered.filter((e) => e.panchayat === kbFilterPanchayat);
+
+    const kbUniqueBlocks = [
+      ...new Set(khataEntries.map((e) => e.block)),
+    ].sort();
+    const kbUniquePanchayats = kbFilterBlock
+      ? [
+          ...new Set(
+            khataEntries
+              .filter((e) => e.block === kbFilterBlock)
+              .map((e) => e.panchayat),
+          ),
+        ].sort()
+      : [...new Set(khataEntries.map((e) => e.panchayat))].sort();
+
+    const kbTotalAmt = kbFiltered.reduce((s, e) => s + e.amount, 0);
+    const kbTotalPaid = kbFiltered.reduce((s, e) => s + e.paid, 0);
+    const kbTotalPending = kbFiltered.reduce((s, e) => s + e.pending, 0);
+
+    function resetKbForm() {
+      setKbCustomer("");
+      setKbBlock("");
+      setKbPanchayat("");
+      setKbMaterial("");
+      setKbQty("");
+      setKbRate("");
+      setKbDate(today);
+      setKbPaid("0");
+      setKbBillNo("");
+      setKbRemarks("");
+      setEditingKhata(null);
+    }
+
+    function handleKbSave(e: React.FormEvent) {
+      e.preventDefault();
+      if (
+        !kbCustomer ||
+        !kbBlock ||
+        !kbPanchayat ||
+        !kbMaterial ||
+        !kbQty ||
+        !kbRate ||
+        !kbDate
+      ) {
+        alert("सभी आवश्यक फील्ड भरें");
+        return;
+      }
+      const rate = Number.parseFloat(kbRate);
+      const qty = Number.parseFloat(kbQty);
+      if (Number.isNaN(rate) || rate <= 0 || Number.isNaN(qty) || qty <= 0) {
+        alert("दर और मात्रा सही भरें");
+        return;
+      }
+      const amt = rate * qty;
+      const paid = Number.parseFloat(kbPaid) || 0;
+      const pend = Math.max(0, amt - paid);
+      const billNo = kbBillNo.trim() || generateKhataNumber(khataEntries);
+      const entry: KhataEntry = {
+        id: editingKhata?.id || Date.now(),
+        billNumber: billNo,
+        date: kbDate,
+        customerName: kbCustomer,
+        block: kbBlock,
+        panchayat: kbPanchayat,
+        material: kbMaterial,
+        quantity: qty,
+        rate,
+        amount: amt,
+        paid,
+        pending: pend,
+        remarks: kbRemarks,
+      };
+      let updated: KhataEntry[];
+      if (editingKhata) {
+        updated = khataEntries.map((e) =>
+          e.id === editingKhata.id ? entry : e,
+        );
+      } else {
+        updated = [...khataEntries, entry];
+      }
+      saveKhataToStorage(updated);
+      setKhataEntries(updated);
+      resetKbForm();
+      alert(`✅ एंट्री सुरक्षित | बिल नं: ${billNo}`);
+    }
+
+    function handleKbEdit(entry: KhataEntry) {
+      setEditingKhata(entry);
+      setKbCustomer(entry.customerName);
+      setKbBlock(entry.block);
+      setKbPanchayat(entry.panchayat);
+      setKbMaterial(entry.material);
+      setKbQty(String(entry.quantity));
+      setKbRate(String(entry.rate));
+      setKbDate(entry.date);
+      setKbPaid(String(entry.paid));
+      setKbBillNo(entry.billNumber);
+      setKbRemarks(entry.remarks);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function handleKbDelete(id: number) {
+      if (confirm("यह एंट्री हटाना है?")) {
+        const updated = khataEntries.filter((e) => e.id !== id);
+        saveKhataToStorage(updated);
+        setKhataEntries(updated);
+        if (editingKhata?.id === id) resetKbForm();
+      }
+    }
+
+    function handleKbPrint() {
+      if (!kbFiltered.length) {
+        alert("कोई एंट्री नहीं");
+        return;
+      }
+      const rows = kbFiltered
+        .map(
+          (e, i) =>
+            `<tr><td>${i + 1}</td><td>${e.billNumber}</td><td>${e.date}</td><td>${e.customerName}</td><td>${e.block}</td><td>${e.panchayat}</td><td>${e.material}</td><td>${e.quantity}</td><td>₹${e.rate}</td><td>₹${e.amount.toFixed(2)}</td><td>₹${e.paid.toFixed(2)}</td><td>₹${e.pending.toFixed(2)}</td><td>${e.remarks}</td></tr>`,
+        )
+        .join("");
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>खाता बही</title><style>body{font-family:Arial;margin:20px;}.h{text-align:center;border-bottom:2px solid #2b8c4a;margin-bottom:20px;}table{border-collapse:collapse;width:100%;font-size:9px;}th,td{border:1px solid #000;padding:4px;}</style></head><body><div class="h"><h2>📒 खाता बही — जीविका दीदी ग्रीन नर्सरी</h2><p>पता: पकरिया, अजगरी, बंजरिया, पूर्वी चंपारण | मोबाइल: 8292480148, 9504800073</p><p>कुल एंट्री: ${kbFiltered.length} | तिथि: ${new Date().toLocaleString()}</p></div><table><thead><tr><th>क्र.</th><th>बिल नं.</th><th>तिथि</th><th>ग्राहक</th><th>ब्लॉक</th><th>पंचायत</th><th>सामग्री</th><th>मात्रा</th><th>दर</th><th>राशि</th><th>प्राप्त</th><th>बकाया</th><th>टिप्पणी</th></tr></thead><tbody>${rows}<tr style="font-weight:bold"><td colspan="9" align="right">कुल योग</td><td>₹${kbTotalAmt.toFixed(2)}</td><td>₹${kbTotalPaid.toFixed(2)}</td><td>₹${kbTotalPending.toFixed(2)}</td><td></td></tr></tbody></table><p>हस्ताक्षर: ___________ &nbsp; दिनांक: ${new Date().toLocaleDateString()}</p></body></html>`;
+      const w = window.open("", "_blank");
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+        w.print();
+      }
+    }
+
+    return (
+      <div className="section">
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "1rem",
+            flexWrap: "wrap",
+            gap: "0.75rem",
+          }}
+        >
+          <h2 className="section-title" style={{ marginBottom: 0 }}>
+            📒 खाता बही — जीविका दीदी ग्रीन नर्सरी
+          </h2>
+          <button
+            type="button"
+            className="btn-logout"
+            onClick={handleKhataLogout}
+            data-ocid="khataBahi.close_button"
+          >
+            <i className="fas fa-sign-out-alt" /> लॉगआउट
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gap: "1.5rem",
+            marginBottom: "1.5rem",
+          }}
+        >
+          <div className="ledger-form-card">
+            <h2>{editingKhata ? "✏️ एंट्री संपादित करें" : "📝 नई एंट्री जोड़ें"}</h2>
+            <form onSubmit={handleKbSave}>
+              <div className="form-group">
+                <label htmlFor="kb-customer">ग्राहक का नाम *</label>
+                <input
+                  id="kb-customer"
+                  type="text"
+                  className="form-input"
+                  placeholder="ग्राहक का नाम"
+                  required
+                  value={kbCustomer}
+                  onChange={(e) => setKbCustomer(e.target.value)}
+                  data-ocid="khataBahi.input"
+                />
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="kb-block">ब्लॉक *</label>
+                  <select
+                    id="kb-block"
+                    className="form-input"
+                    value={kbBlock}
+                    required
+                    onChange={(e) => {
+                      setKbBlock(e.target.value);
+                      setKbPanchayat("");
+                    }}
+                    data-ocid="khataBahi.block.select"
+                  >
+                    <option value="">-- ब्लॉक चुनें --</option>
+                    {ALL_BLOCKS.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="kb-panchayat">पंचायत *</label>
+                  <select
+                    id="kb-panchayat"
+                    className="form-input"
+                    value={kbPanchayat}
+                    required
+                    onChange={(e) => setKbPanchayat(e.target.value)}
+                    data-ocid="khataBahi.panchayat.select"
+                  >
+                    <option value="">-- पंचायत चुनें --</option>
+                    {kbPanchayatOptions.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                    {kbPanchayatOptions.length === 0 && kbBlock && (
+                      <option value="ग्राम पंचायत 1">ग्राम पंचायत 1</option>
+                    )}
+                  </select>
+                </div>
+              </div>
+              <div className="form-group">
+                <label htmlFor="kb-billno">बिल नंबर (खाली छोड़ें)</label>
+                <input
+                  id="kb-billno"
+                  type="text"
+                  className="form-input"
+                  placeholder="अपने आप जनरेट होगा"
+                  value={kbBillNo}
+                  onChange={(e) => setKbBillNo(e.target.value)}
+                  data-ocid="khataBahi.input"
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="kb-material">सामग्री *</label>
+                <input
+                  id="kb-material"
+                  type="text"
+                  className="form-input"
+                  placeholder="जैसे: पौधा, बांस गेबियन"
+                  required
+                  value={kbMaterial}
+                  onChange={(e) => setKbMaterial(e.target.value)}
+                  data-ocid="khataBahi.input"
+                />
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="kb-qty">मात्रा *</label>
+                  <input
+                    id="kb-qty"
+                    type="number"
+                    className="form-input"
+                    step="any"
+                    required
+                    placeholder="0"
+                    value={kbQty}
+                    onChange={(e) => setKbQty(e.target.value)}
+                    data-ocid="khataBahi.input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="kb-rate">दर (₹) *</label>
+                  <input
+                    id="kb-rate"
+                    type="number"
+                    className="form-input"
+                    step="0.01"
+                    required
+                    placeholder="0.00"
+                    value={kbRate}
+                    onChange={(e) => setKbRate(e.target.value)}
+                    data-ocid="khataBahi.input"
+                  />
+                </div>
+              </div>
+              <div
+                style={{
+                  background: "#eef5ea",
+                  padding: "10px",
+                  borderRadius: "12px",
+                  fontWeight: "bold",
+                  textAlign: "center",
+                  margin: "8px 0",
+                  fontSize: "0.9rem",
+                }}
+              >
+                💰 राशि: ₹{kbAmount.toFixed(2)} | बकाया: ₹{kbPending.toFixed(2)}
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="kb-date">तिथि *</label>
+                  <input
+                    id="kb-date"
+                    type="date"
+                    className="form-input"
+                    required
+                    value={kbDate}
+                    onChange={(e) => setKbDate(e.target.value)}
+                    data-ocid="khataBahi.input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="kb-paid">भुगतान प्राप्त (₹)</label>
+                  <input
+                    id="kb-paid"
+                    type="number"
+                    className="form-input"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={kbPaid}
+                    onChange={(e) => setKbPaid(e.target.value)}
+                    data-ocid="khataBahi.input"
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label htmlFor="kb-remarks">टिप्पणी</label>
+                <input
+                  id="kb-remarks"
+                  type="text"
+                  className="form-input"
+                  placeholder="कोई नोट..."
+                  value={kbRemarks}
+                  onChange={(e) => setKbRemarks(e.target.value)}
+                  data-ocid="khataBahi.input"
+                />
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                  marginTop: "10px",
+                }}
+              >
+                <button
+                  type="submit"
+                  className="btn"
+                  style={{ flex: 1 }}
+                  data-ocid="khataBahi.submit_button"
+                >
+                  💾 सेव करें
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ flex: 1 }}
+                  onClick={resetKbForm}
+                  data-ocid="khataBahi.secondary_button"
+                >
+                  🔄 नया / साफ
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div className="ledger-form-card">
+            <h2>🔍 खोजें &amp; फ़िल्टर</h2>
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "10px" }}
+            >
+              <input
+                type="text"
+                className="form-input"
+                placeholder="ग्राहक नाम से खोजें"
+                value={kbSearchCustomer}
+                onChange={(e) => setKbSearchCustomer(e.target.value)}
+                data-ocid="khataBahi.search_input"
+              />
+              <div className="form-row">
+                <select
+                  className="form-input"
+                  value={kbFilterBlock}
+                  onChange={(e) => {
+                    setKbFilterBlock(e.target.value);
+                    setKbFilterPanchayat("");
+                  }}
+                  data-ocid="khataBahi.block.select"
+                >
+                  <option value="">सभी ब्लॉक</option>
+                  {kbUniqueBlocks.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="form-input"
+                  value={kbFilterPanchayat}
+                  onChange={(e) => setKbFilterPanchayat(e.target.value)}
+                  data-ocid="khataBahi.panchayat.select"
+                >
+                  <option value="">सभी पंचायत</option>
+                  {kbUniquePanchayats.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => {
+                  setKbSearchCustomer("");
+                  setKbFilterBlock("");
+                  setKbFilterPanchayat("");
+                }}
+                data-ocid="khataBahi.secondary_button"
+              >
+                रीसेट फ़िल्टर
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={handleKbPrint}
+                data-ocid="khataBahi.primary_button"
+              >
+                🖨️ प्रिंट करें
+              </button>
+            </div>
+            <div
+              style={{
+                marginTop: "1.5rem",
+                padding: "1rem",
+                background: "#f9fff7",
+                borderRadius: "12px",
+                border: "1px solid #e0e7e0",
+              }}
+            >
+              <p
+                style={{
+                  fontWeight: "bold",
+                  color: "#1b4d2b",
+                  marginBottom: "0.5rem",
+                }}
+              >
+                📊 कुल सारांश (फ़िल्टर के अनुसार)
+              </p>
+              <p>
+                💰 कुल राशि: <strong>₹{kbTotalAmt.toFixed(2)}</strong>
+              </p>
+              <p>
+                💵 कुल प्राप्त: <strong>₹{kbTotalPaid.toFixed(2)}</strong>
+              </p>
+              <p>
+                ⏳ कुल बकाया: <strong>₹{kbTotalPending.toFixed(2)}</strong>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="ledger-form-card">
+          <h2>📋 सभी एंट्री रिकॉर्ड्स ({kbFiltered.length})</h2>
+          <div style={{ overflowX: "auto" }}>
+            <table
+              className="ledger-table"
+              style={{ minWidth: "900px" }}
+              data-ocid="khataBahi.table"
+            >
+              <thead>
+                <tr>
+                  <th>बिल नंबर</th>
+                  <th>तिथि</th>
+                  <th>ग्राहक</th>
+                  <th>ब्लॉक</th>
+                  <th>पंचायत</th>
+                  <th>सामग्री</th>
+                  <th>मात्रा</th>
+                  <th>दर(₹)</th>
+                  <th>राशि(₹)</th>
+                  <th>प्राप्त(₹)</th>
+                  <th>बकाया(₹)</th>
+                  <th>स्थिति</th>
+                  <th>टिप्पणी</th>
+                  <th>कार्रवाई</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kbFiltered.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={14}
+                      style={{
+                        textAlign: "center",
+                        color: "#888",
+                        padding: "20px",
+                      }}
+                      data-ocid="khataBahi.empty_state"
+                    >
+                      कोई एंट्री नहीं
+                    </td>
+                  </tr>
+                ) : (
+                  kbFiltered.map((e, idx) => (
+                    <tr key={e.id} data-ocid={`khataBahi.item.${idx + 1}`}>
+                      <td>
+                        <span
+                          style={{
+                            background: "#2b8c4a20",
+                            padding: "2px 8px",
+                            borderRadius: "12px",
+                            fontSize: "0.7rem",
+                            fontWeight: "bold",
+                            color: "#1e6a3a",
+                          }}
+                        >
+                          {e.billNumber}
+                        </span>
+                      </td>
+                      <td>{e.date}</td>
+                      <td>
+                        <strong>{e.customerName}</strong>
+                      </td>
+                      <td>{e.block}</td>
+                      <td>{e.panchayat}</td>
+                      <td>{e.material}</td>
+                      <td>{e.quantity}</td>
+                      <td>₹{e.rate}</td>
+                      <td>₹{e.amount.toFixed(2)}</td>
+                      <td>₹{e.paid.toFixed(2)}</td>
+                      <td>₹{e.pending.toFixed(2)}</td>
+                      <td>
+                        <span
+                          style={{
+                            background: e.pending === 0 ? "#4caf50" : "#ff9800",
+                            color: "white",
+                            padding: "2px 8px",
+                            borderRadius: "12px",
+                            fontSize: "0.7rem",
+                          }}
+                        >
+                          {e.pending === 0
+                            ? "पूर्ण भुगतान"
+                            : e.paid > 0
+                              ? "आंशिक"
+                              : "बकाया"}
+                        </span>
+                      </td>
+                      <td>{e.remarks}</td>
+                      <td>
+                        <div style={{ display: "flex", gap: "4px" }}>
+                          <button
+                            type="button"
+                            className="icon-btn edit"
+                            onClick={() => handleKbEdit(e)}
+                            title="संपादित करें"
+                            data-ocid={`khataBahi.edit_button.${idx + 1}`}
+                          >
+                            <i className="fas fa-edit" />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-btn danger"
+                            onClick={() => handleKbDelete(e.id)}
+                            title="हटाएं"
+                            data-ocid={`khataBahi.delete_button.${idx + 1}`}
+                          >
+                            <i className="fas fa-trash" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "10px",
+              marginTop: "15px",
+            }}
+          >
+            <div
+              style={{
+                background: "#1e3a2f",
+                color: "white",
+                padding: "12px",
+                borderRadius: "14px",
+                textAlign: "center",
+                fontWeight: "bold",
+                fontSize: "0.85rem",
+              }}
+            >
+              💰 राशि: ₹{kbTotalAmt.toFixed(2)} | सभी: ₹
+              {khataEntries.reduce((s, e) => s + e.amount, 0).toFixed(2)}
+            </div>
+            <div
+              style={{
+                background: "#2196f3",
+                color: "white",
+                padding: "12px",
+                borderRadius: "14px",
+                textAlign: "center",
+                fontWeight: "bold",
+                fontSize: "0.85rem",
+              }}
+            >
+              💵 प्राप्त: ₹{kbTotalPaid.toFixed(2)} | सभी: ₹
+              {khataEntries.reduce((s, e) => s + e.paid, 0).toFixed(2)}
+            </div>
+            <div
+              style={{
+                background: "#ff9800",
+                color: "white",
+                padding: "12px",
+                borderRadius: "14px",
+                textAlign: "center",
+                fontWeight: "bold",
+                fontSize: "0.85rem",
+              }}
+            >
+              ⏳ बकाया: ₹{kbTotalPending.toFixed(2)} | सभी: ₹
+              {khataEntries.reduce((s, e) => s + e.pending, 0).toFixed(2)}
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1664,6 +2407,8 @@ export default function App() {
     { id: "gallery", label: "गैलरी" },
     { id: "location", label: "लोकेशन" },
     { id: "contact", label: "संपर्क" },
+    { id: "khataBahi", label: "📒 खाता बही" },
+    { id: "ledger", label: "🧾 स्मार्ट बिलिंग" },
   ];
 
   return (
@@ -1714,20 +2459,22 @@ export default function App() {
                 {item.label}
               </button>
             ))}
-            <button
-              type="button"
-              className="btn-ledger"
-              onClick={() => navigate("ledger")}
-              data-ocid="nav.ledger.button"
-            >
-              📒 खाता बही
-            </button>
-            {isLoggedIn && (
+            {isLoggedIn && activeSection === "ledger" && (
               <button
                 type="button"
                 className="btn-logout"
                 onClick={handleLogout}
                 data-ocid="nav.logout.button"
+              >
+                लॉगआउट
+              </button>
+            )}
+            {isKhataLoggedIn && activeSection === "khataBahi" && (
+              <button
+                type="button"
+                className="btn-logout"
+                onClick={handleKhataLogout}
+                data-ocid="nav.khata-logout.button"
               >
                 लॉगआउट
               </button>
@@ -1764,22 +2511,24 @@ export default function App() {
               {item.label}
             </button>
           ))}
-          <button
-            type="button"
-            className="btn-ledger"
-            onClick={() => navigate("ledger")}
-            style={{ alignSelf: "flex-start" }}
-            data-ocid="nav.mobile.ledger.button"
-          >
-            📒 खाता बही
-          </button>
-          {isLoggedIn && (
+          {isLoggedIn && activeSection === "ledger" && (
             <button
               type="button"
               className="btn-logout"
               onClick={handleLogout}
               style={{ alignSelf: "flex-start" }}
               data-ocid="nav.mobile.logout.button"
+            >
+              लॉगआउट
+            </button>
+          )}
+          {isKhataLoggedIn && activeSection === "khataBahi" && (
+            <button
+              type="button"
+              className="btn-logout"
+              onClick={handleKhataLogout}
+              style={{ alignSelf: "flex-start" }}
+              data-ocid="nav.mobile.khata-logout.button"
             >
               लॉगआउट
             </button>
@@ -1797,6 +2546,7 @@ export default function App() {
         {activeSection === "location" && renderLocation()}
         {activeSection === "contact" && renderContact()}
         {activeSection === "ledger" && renderLedger()}
+        {activeSection === "khataBahi" && renderKhataBahi()}
       </main>
 
       {/* Footer */}
@@ -1829,6 +2579,85 @@ export default function App() {
       >
         <i className="fas fa-arrow-up" />
       </button>
+
+      {/* Khata Bahi Login Modal */}
+      {showKhataModal && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowKhataModal(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setShowKhataModal(false);
+          }}
+          role="presentation"
+          data-ocid="khataBahi.modal"
+        >
+          <div className="modal-content">
+            <div className="modal-title">
+              <i className="fas fa-lock" /> 📒 खाता बही — लॉगिन
+            </div>
+            <div className="form-group" style={{ marginBottom: "0.75rem" }}>
+              <label htmlFor="khata-username">यूजरनेम</label>
+              <input
+                id="khata-username"
+                type="text"
+                className="form-input"
+                placeholder="यूजरनेम डालें"
+                value={khataUser}
+                onChange={(e) => setKhataUser(e.target.value)}
+                autoComplete="username"
+                data-ocid="khataBahi.input"
+              />
+            </div>
+            <div className="form-group" style={{ marginBottom: "1rem" }}>
+              <label htmlFor="khata-password">पासवर्ड</label>
+              <input
+                id="khata-password"
+                type="password"
+                className="form-input"
+                placeholder="पासवर्ड डालें"
+                value={khataPwd}
+                onChange={(e) => setKhataPwd(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleKhataLogin();
+                }}
+                autoComplete="current-password"
+                data-ocid="khataBahi.input"
+              />
+            </div>
+            {khataError && (
+              <div className="error-msg" data-ocid="khataBahi.error_state">
+                {khataError}
+              </div>
+            )}
+            <div
+              style={{ display: "flex", gap: "0.75rem", marginTop: "1.25rem" }}
+            >
+              <button
+                type="button"
+                className="btn"
+                style={{ flex: 1 }}
+                onClick={handleKhataLogin}
+                data-ocid="khataBahi.submit_button"
+              >
+                <i className="fas fa-sign-in-alt" /> लॉगिन करें
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => {
+                  setShowKhataModal(false);
+                  setKhataError("");
+                }}
+                data-ocid="khataBahi.cancel_button"
+              >
+                रद्द करें
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Login Modal */}
       {showLoginModal && (
@@ -1905,229 +2734,6 @@ export default function App() {
                 रद्द करें
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Bill Modal */}
-      {showEditModal && editingBill && (
-        <div
-          className="modal-overlay"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowEditModal(false);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setShowEditModal(false);
-          }}
-          role="presentation"
-          data-ocid="edit.modal"
-        >
-          <div className="modal-content large">
-            <div className="modal-title">
-              <i className="fas fa-edit" /> बिल एडिट करें
-            </div>
-            <form onSubmit={handleUpdateBill}>
-              <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="field-8">
-                    ब्लॉक <span style={{ color: "red" }}>*</span>
-                  </label>
-                  <input
-                    id="field-8"
-                    type="text"
-                    className="form-input"
-                    required
-                    value={editData.block}
-                    onChange={(e) =>
-                      setEditData({ ...editData, block: e.target.value })
-                    }
-                    data-ocid="edit.block.input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="editPanchayat">
-                    पंचायत <span style={{ color: "red" }}>*</span>
-                  </label>
-                  <input
-                    id="editPanchayat"
-                    type="text"
-                    className="form-input"
-                    required
-                    value={editData.panchayat}
-                    onChange={(e) =>
-                      setEditData({ ...editData, panchayat: e.target.value })
-                    }
-                    data-ocid="edit.panchayat.input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="field-9">ग्राहक नाम</label>
-                  <input
-                    id="field-9"
-                    type="text"
-                    className="form-input"
-                    value={editData.customerName}
-                    onChange={(e) =>
-                      setEditData({ ...editData, customerName: e.target.value })
-                    }
-                    data-ocid="edit.customer.input"
-                  />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="editBillNo">बिल नंबर</label>
-                  <input
-                    id="editBillNo"
-                    type="text"
-                    className="form-input"
-                    value={editData.billNo}
-                    onChange={(e) =>
-                      setEditData({ ...editData, billNo: e.target.value })
-                    }
-                    data-ocid="edit.billno.input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="field-10">
-                    बिल दिनांक <span style={{ color: "red" }}>*</span>
-                  </label>
-                  <input
-                    id="field-10"
-                    type="date"
-                    className="form-input"
-                    required
-                    value={editData.billDate}
-                    onChange={(e) =>
-                      setEditData({ ...editData, billDate: e.target.value })
-                    }
-                    data-ocid="edit.billdate.input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="editWorkCode">वर्क कोड</label>
-                  <input
-                    id="editWorkCode"
-                    type="text"
-                    className="form-input"
-                    value={editData.workCode}
-                    onChange={(e) =>
-                      setEditData({ ...editData, workCode: e.target.value })
-                    }
-                    data-ocid="edit.workcode.input"
-                  />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="field-11">भुगतान दिनांक</label>
-                  <input
-                    id="field-11"
-                    type="date"
-                    className="form-input"
-                    value={editData.paymentDate}
-                    onChange={(e) =>
-                      setEditData({ ...editData, paymentDate: e.target.value })
-                    }
-                    data-ocid="edit.paymentdate.input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="editPrsName">P.R.S नाम</label>
-                  <input
-                    id="editPrsName"
-                    type="text"
-                    className="form-input"
-                    value={editData.prsName}
-                    onChange={(e) =>
-                      setEditData({ ...editData, prsName: e.target.value })
-                    }
-                    data-ocid="edit.prs.input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="field-12">मोबाइल नंबर</label>
-                  <input
-                    id="field-12"
-                    type="tel"
-                    className="form-input"
-                    value={editData.mobile}
-                    onChange={(e) =>
-                      setEditData({ ...editData, mobile: e.target.value })
-                    }
-                    data-ocid="edit.mobile.input"
-                  />
-                </div>
-              </div>
-
-              <div className="items-section">
-                <div className="items-section-title">
-                  <i className="fas fa-leaf" /> पौधों की सूची
-                </div>
-                {editItems.map((item, i) => (
-                  <PlantItemRow
-                    key={`edit-${i}-${item.plant}`}
-                    item={item}
-                    index={i}
-                    prefix="edit.plant"
-                    onChange={(idx, updated) => {
-                      setEditItems((prev) =>
-                        prev.map((it, j) => (j === idx ? updated : it)),
-                      );
-                    }}
-                    onRemove={(idx) =>
-                      setEditItems((prev) => prev.filter((_, j) => j !== idx))
-                    }
-                  />
-                ))}
-                <button
-                  type="button"
-                  className="btn"
-                  style={{
-                    background: "var(--secondary)",
-                    color: "var(--dark-green)",
-                    marginTop: "0.5rem",
-                  }}
-                  onClick={() => setEditItems((prev) => [...prev, emptyItem()])}
-                  data-ocid="edit.add.button"
-                >
-                  <i className="fas fa-plus" /> और पौधा जोड़ें
-                </button>
-              </div>
-
-              <div
-                style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}
-              >
-                <button
-                  type="submit"
-                  className="btn"
-                  disabled={editSubmitting}
-                  data-ocid="edit.confirm_button"
-                >
-                  {editSubmitting ? (
-                    <>
-                      <i className="fas fa-spinner fa-spin" /> अपडेट हो रहा है...
-                    </>
-                  ) : (
-                    <>
-                      <i className="fas fa-save" /> अपडेट करें
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ background: "#e76f51" }}
-                  onClick={() => {
-                    setShowEditModal(false);
-                    setEditingBill(null);
-                  }}
-                  data-ocid="edit.cancel_button"
-                >
-                  <i className="fas fa-times" /> रद्द करें
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
