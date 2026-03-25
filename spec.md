@@ -1,59 +1,39 @@
 # Jeevika Didi Green Nursery
 
 ## Current State
-- Full website with sections: Home, Plants, Training, Certificate, Gallery, Location, Contact
-- One `ledger` section (Smart Billing System) with login: `JEEVIKA DIDI GREEN NURSERY` / `Jeevika@123`
-- Navigation has a single `📒 खाता बही` nav link pointing to `ledger`
+App has two billing systems:
+1. **खाता बही** — uses `KBTransaction[]` stored in `nursery_khata_transactions`. Has multi-plant items per bill, free-text block/panchayat, location cards grouped by block/panchayat, customer breakdown, search, edit, delete, print.
+2. **स्मार्ट बिलिंग** — uses `SmartBill[]` stored in `jeevika_secure_billing`. Has single material/rate/qty per bill, tabular view, advanced filters, transport charge, vendor, financial year.
 
 ## Requested Changes (Diff)
 
 ### Add
-- New separate section `khataBahi` — the original simple खाता बही (Ledger) system
-- Separate login for खाता बही: Username `jeevikadidigreennursery`, Password `Jeevika`
-- Separate login state for खाता बही (independent from Smart Billing login)
-- Navigation item `📒 खाता बही` → navigates to `khataBahi`
-- Navigation item `🧾 स्मार्ट बिलिंग` → navigates to `ledger` (existing Smart Billing System)
+- New state variables for Smart Billing system that mirror the खाता बही state (prefix `sb2`): `sb2Transactions`, `sb2PlantList`, `sb2FormBlock`, `sb2FormPanchayat`, `sb2FormCustomer`, `sb2FormBillNo`, `sb2FormBillDate`, `sb2FormWorkCode`, `sb2FormPaymentDate`, `sb2FormPrsName`, `sb2FormMobile`, `sb2FormItems`, `sb2SearchBlock`, `sb2SearchPanchayat`, `sb2SearchCustomer`, `sb2EditModal`, `sb2EditId`, `sb2EditBlock`, `sb2EditPanchayat`, `sb2EditCustomer`, `sb2EditBillNo`, `sb2EditBillDate`, `sb2EditWorkCode`, `sb2EditPaymentDate`, `sb2EditPrsName`, `sb2EditMobile`, `sb2EditItems`.
+- `sb2Transactions` uses `KBTransaction` type, stored in localStorage key `smart_billing_khata` (new key to avoid conflict with old SmartBill format)
+- `sb2PlantList` initialized with same `KB_PLANT_LIST_DEFAULT`
 
 ### Modify
-- Navigation: currently has one `📒 खाता बही` button; now needs TWO nav items: `📒 खाता बही` and `🧾 स्मार्ट बिलिंग`
-- Login modal: must handle two separate logins — one for `khataBahi` and one for `ledger`, each with their own credentials and session state
-- `renderLedger()` heading already says `स्मार्ट बिलिंग सिस्टम` — keep as-is
-- `handleLogout()` for खाता बही logs out only from खाता बही (does not affect Smart Billing login state)
+- `renderLedger()` — replace the entire Smart Billing tabular UI with the exact same UI as `renderKhataBahi()`, but:
+  - Uses `sb2*` state variables instead of `kb*` state variables
+  - Title: `📒 स्मार्ट बिलिंग — ब्लॉक/पंचायत वार खाता`
+  - Section header text: `🧾 स्मार्ट बिलिंग सिस्टम` (navigation label stays the same)
+  - data-ocid prefix: `smartBilling` instead of `khataBahi`
+  - datalist IDs use `sb2-` prefix to avoid conflicts with खाता बही datalists
+  - Print template header says "स्मार्ट बिलिंग सिस्टम" instead of just nursery name header
+  - Logout button text stays same
+  - Everything else (form fields, location cards, search, edit modal, print) is identical to खाता बही
 
 ### Remove
-- Nothing removed
+- All old Smart Billing state variables that are no longer needed: `smartBills`, `editingSmartBill`, `sbBlock`, `sbPanchayat`, `sbBillNumber`, `sbMaterial`, `sbVendor`, `sbRate`, `sbQty`, `sbTransport`, `sbPaid`, `sbDate`, `sbFinYear`, `filterBlock`, `filterPanchayat`, `filterBillNo`, `filterMaterial`, `filterYear`, `filterPayment`, `globalFinancialYear`
+- `SmartBill` interface
+- `PANCHAYAT_MAP` constant
+- `generateBillNumber`, `computeAmount`, `computePending`, `generatePrintHTML` functions (only used by old Smart Billing)
+- `STORAGE_KEY` constant (was `jeevika_secure_billing`)
 
 ## Implementation Plan
-
-1. Add new state variables:
-   - `isKhataLoggedIn: boolean` — separate from `isLoggedIn` (Smart Billing)
-   - `showKhataLoginModal: boolean`
-   - `khataLoginUsername/Password/Error` strings
-
-2. Add `renderKhataBahi()` function:
-   - Simple traditional खाता बही UI (classic ledger style, green color scheme)
-   - Own localStorage key `jeevika_khata_bahi`
-   - Fields: बिल नंबर, तिथि, ग्राहक का नाम, ब्लॉक, पंचायत, सामग्री, मात्रा, दर, राशि, भुगतान स्थिति
-   - Block dropdown (same ALL_BLOCKS list), panchayat dropdown (same PANCHAYAT_MAP)
-   - Add/Edit/Delete entries
-   - Search by customer name / block / panchayat
-   - Print button
-   - Totals footer
-   - Logout button that clears `isKhataLoggedIn` only
-
-3. Update `navigate()` function:
-   - `section === 'khataBahi'` → check `isKhataLoggedIn`, if not show khata login modal
-   - `section === 'ledger'` → check `isLoggedIn`, if not show smart billing login modal (existing behavior)
-
-4. Add `handleKhataLogin()` and `handleKhataLogout()` functions:
-   - Credentials: `jeevikadidigreennursery` / `Jeevika`
-   - On success: `setIsKhataLoggedIn(true)`, navigate to `khataBahi`
-
-5. Update nav:
-   - Add `{ id: 'khataBahi', label: '📒 खाता बही' }` to navItems
-   - Change existing ledger nav label from `📒 खाता बही` to `🧾 स्मार्ट बिलिंग`
-   - Both appear in desktop and mobile nav
-
-6. Add login modal for खाता बही (similar style to existing Smart Billing login modal but separate)
-
-7. Update `renderContent()` / section rendering to include `khataBahi` case
+1. Read current App.tsx fully
+2. Remove old Smart Billing code (state, types, helper functions)
+3. Add sb2 state variables (same structure as kb state)
+4. Replace renderLedger() with a copy of renderKhataBahi() using sb2 state
+5. Update localStorage save/load for sb2 data using key `smart_billing_khata`
+6. Validate and build
